@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/example/ai-pr-reviewer/config"
@@ -38,10 +39,11 @@ type Handler struct {
 	processor     ReviewProcessor
 	logger        *slog.Logger
 	now           func() time.Time
+	inFlight      *inFlightReviewTracker
 }
 
 func NewHandler(signingSecret string, gitlab GitLabClassifier, jira JiraClassifier, processor ReviewProcessor, logger *slog.Logger) *Handler {
-	return &Handler{signingSecret: signingSecret, gitlab: gitlab, jira: jira, processor: processor, logger: logger, now: time.Now}
+	return &Handler{signingSecret: signingSecret, gitlab: gitlab, jira: jira, processor: processor, logger: logger, now: time.Now, inFlight: newInFlightReviewTracker()}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -78,15 +80,52 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeSlackMessage(w, err.Error())
 		return
 	}
+	key := inFlightReviewKey{projectPath: parsed.ProjectPath, mrIID: parsed.MRIID, issueKey: parsed.IssueKey}
+	if !h.inFlight.tryAcquire(key) {
+		writeSlackMessage(w, ":hourglass_flowing_sand: I'm still reviewing that merge request. Wait for my review before asking me to review it again.")
+		return
+	}
 
 	h.logger.InfoContext(r.Context(), "review command accepted", slog.String("issue_key", parsed.IssueKey), slog.String("project_path", parsed.ProjectPath), slog.Int("mr_iid", parsed.MRIID))
 	writeSlackMessage(w, ":mag: Reviewing MR... I'll post results here shortly.")
 
 	go func() {
+		defer h.inFlight.release(key)
 		ctx, cancel := context.WithTimeout(context.Background(), config.ReviewTimeout)
 		defer cancel()
 		h.processor.Process(ctx, parsed)
 	}()
+}
+
+type inFlightReviewKey struct {
+	projectPath string
+	mrIID       int
+	issueKey    string
+}
+
+type inFlightReviewTracker struct {
+	mu      sync.Mutex
+	reviews map[inFlightReviewKey]struct{}
+}
+
+func newInFlightReviewTracker() *inFlightReviewTracker {
+	return &inFlightReviewTracker{reviews: make(map[inFlightReviewKey]struct{})}
+}
+
+func (t *inFlightReviewTracker) tryAcquire(key inFlightReviewKey) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if _, exists := t.reviews[key]; exists {
+		return false
+	}
+	t.reviews[key] = struct{}{}
+	return true
+}
+
+func (t *inFlightReviewTracker) release(key inFlightReviewKey) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.reviews, key)
 }
 
 func (h *Handler) verifySignature(header http.Header, body []byte) error {
