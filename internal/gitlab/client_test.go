@@ -57,8 +57,10 @@ func TestFormatDiffTruncatesEachFile(t *testing.T) {
 
 func TestGetMRChangesEscapesProjectPathOnce(t *testing.T) {
 	var gotPath string
+	var gotRawDiffs string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.EscapedPath()
+		gotRawDiffs = r.URL.Query().Get("access_raw_diffs")
 		_, _ = w.Write([]byte(`{"changes":[]}`))
 	}))
 	defer server.Close()
@@ -76,6 +78,9 @@ func TestGetMRChangesEscapesProjectPathOnce(t *testing.T) {
 	wantPath := "/api/v4/projects/platform%2Fapplication/merge_requests/108/changes"
 	if gotPath != wantPath {
 		t.Fatalf("request path = %q, want %q", gotPath, wantPath)
+	}
+	if gotRawDiffs != "true" {
+		t.Fatalf("access_raw_diffs = %q, want true", gotRawDiffs)
 	}
 }
 

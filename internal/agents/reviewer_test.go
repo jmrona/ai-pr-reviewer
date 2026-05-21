@@ -1,6 +1,11 @@
 package agents
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestParseModeratorOutputParsesSectionsAndLocations(t *testing.T) {
 	output := `TICKET_COVERAGE:
@@ -88,6 +93,61 @@ SUMMARY: Safe to merge.`
 	}
 	if result.Summary != "Safe to merge." {
 		t.Fatalf("Summary = %q", result.Summary)
+	}
+}
+
+func TestParseModeratorOutputPreservesMixedAgentLabels(t *testing.T) {
+	output := `TICKET_COVERAGE:
+:white_check_mark: All criteria covered
+
+BLOCKERS:
+- [Architect] Cross-slice contract bypasses the boundary (api/auth.go:11)
+
+WARNINGS:
+- [Designer] Empty state copy is unclear (collab/auth.tsx:24)
+
+SUGGESTIONS:
+- [Pragmatist] Add the missing ticket coverage assertion
+
+ASSUMPTIONS:
+None
+
+SUMMARY:
+Fix the blocker before merging.`
+
+	result, err := ParseModeratorOutput(output)
+	if err != nil {
+		t.Fatalf("ParseModeratorOutput() error = %v", err)
+	}
+
+	if result.Blockers[0].Agent != "Architect" {
+		t.Fatalf("blocker agent = %q, want Architect", result.Blockers[0].Agent)
+	}
+	if result.Warnings[0].Agent != "Designer" {
+		t.Fatalf("warning agent = %q, want Designer", result.Warnings[0].Agent)
+	}
+	if result.Suggestions[0].Agent != "Pragmatist" {
+		t.Fatalf("suggestion agent = %q, want Pragmatist", result.Suggestions[0].Agent)
+	}
+}
+
+func TestModeratorSkillContainsStableLabelGuardrails(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(projectSkillsDir, "moderator.md"))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+
+	content := string(data)
+	guardrails := []string{
+		"Do not default all findings to [Pragmatist]",
+		"Use [Architect] for architecture, security, boundaries, coupling, scalability, lifecycle, contracts, and long-term structure.",
+		"Use [Designer] for UX, accessibility, product behaviour, naming/readability, copy, visual consistency, and user-facing clarity.",
+	}
+
+	for _, guardrail := range guardrails {
+		if !strings.Contains(content, guardrail) {
+			t.Fatalf("moderator.md does not contain guardrail %q", guardrail)
+		}
 	}
 }
 

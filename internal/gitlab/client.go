@@ -85,7 +85,7 @@ func (c *Client) ClassifyMRURL(rawURL string) (string, int, bool, error) {
 }
 
 func (c *Client) GetMRChanges(ctx context.Context, projectPath string, mrIID int) (*MRChanges, error) {
-	apiURL := strings.TrimRight(c.baseURL.String(), "/") + "/api/v4/projects/" + url.PathEscape(projectPath) + "/merge_requests/" + strconv.Itoa(mrIID) + "/changes"
+	apiURL := strings.TrimRight(c.baseURL.String(), "/") + "/api/v4/projects/" + url.PathEscape(projectPath) + "/merge_requests/" + strconv.Itoa(mrIID) + "/changes?access_raw_diffs=true"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating GitLab request: %w", err)

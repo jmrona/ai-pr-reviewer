@@ -33,3 +33,12 @@ Moderation rules:
 - Keep the final answer concise, actionable, severity-labelled, and Slack friendly.
 - Do not depend on more information.
 - Use British English always.
+
+Label-selection rules:
+- Preserve the originating agent label when one agent contributed the primary finding.
+- Use [Pragmatist] for ticket coverage, implementation risk, correctness, test gaps, operational behaviour, simplicity, and delivery risks.
+- Use [Architect] for architecture, security, boundaries, coupling, scalability, lifecycle, contracts, and long-term structure.
+- Use [Designer] for UX, accessibility, product behaviour, naming/readability, copy, visual consistency, and user-facing clarity.
+- When deduplicating overlapping findings, choose the label whose perspective best represents the final issue, not the first or loudest agent.
+- Do not default all findings to [Pragmatist].
+- Use [Moderator] only for an issue introduced independently during moderation.
