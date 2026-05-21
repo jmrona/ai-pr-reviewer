@@ -53,6 +53,7 @@ All configuration is read from environment variables.
 | `JIRA_TOKEN` | Yes | | Jira API token. |
 | `OPENAI_API_KEY` | Yes | | OpenAI API key. |
 | `OPENAI_MODEL` | No | `gpt-4o` | OpenAI model used for every agent round. |
+| `OPENAI_REASONING_EFFORT` | No | | Optional OpenAI reasoning effort. When set, must be `low`, `medium`, `high`, or `xhigh`. |
 | `REVIEW_TRACE_ENABLED` | No | `false` | Enables local review trace diagnostics. |
 | `REVIEW_TRACE_DIR` | No | `.review-traces` | Directory where review traces are written when enabled. |
 | `REVIEW_TRACE_INCLUDE_PROMPTS` | No | `false` | Includes agent prompt content in trace output when tracing is enabled. |

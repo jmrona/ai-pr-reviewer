@@ -6,7 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	openai "github.com/sashabaranov/go-openai"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/shared"
 )
 
 type Issue struct {
@@ -40,6 +42,7 @@ type ReviewOutcome struct {
 
 type ReviewTrace struct {
 	Model           string
+	ReasoningEffort string
 	IncludePrompts  bool
 	AgentMessages   []AgentTraceMessage
 	ModeratorOutput string
@@ -53,24 +56,26 @@ type AgentTraceMessage struct {
 }
 
 type OpenAIReviewer struct {
-	client         *openai.Client
-	model          string
-	skills         map[string]string
-	includePrompts bool
+	client          openai.Client
+	model           string
+	reasoningEffort string
+	skills          map[string]string
+	includePrompts  bool
 }
 
-func NewOpenAIReviewer(apiKey, model string, skills map[string]string, includePrompts bool) *OpenAIReviewer {
+func NewOpenAIReviewer(apiKey, model, reasoningEffort string, skills map[string]string, includePrompts bool) *OpenAIReviewer {
 	return &OpenAIReviewer{
-		client:         openai.NewClient(apiKey),
-		model:          model,
-		skills:         skills,
-		includePrompts: includePrompts,
+		client:          openai.NewClient(option.WithAPIKey(apiKey)),
+		model:           model,
+		reasoningEffort: reasoningEffort,
+		skills:          skills,
+		includePrompts:  includePrompts,
 	}
 }
 
 func (r *OpenAIReviewer) Review(ctx context.Context, ticketContext, diff string, diffTruncated bool) (ReviewOutcome, error) {
 	debate := make([]AgentMessage, 0, 3)
-	trace := ReviewTrace{Model: r.model, IncludePrompts: r.includePrompts, AgentMessages: make([]AgentTraceMessage, 0, 4)}
+	trace := ReviewTrace{Model: r.model, ReasoningEffort: r.reasoningEffort, IncludePrompts: r.includePrompts, AgentMessages: make([]AgentTraceMessage, 0, 4)}
 
 	pragmatist, pragmatistTrace, err := r.runAgent(ctx, "Pragmatist", "pragmatist", ticketContext, diff, nil, 0.3)
 	if err != nil {
@@ -117,23 +122,38 @@ func (r *OpenAIReviewer) runAgent(ctx context.Context, agent, role, ticketContex
 	}
 	userPrompt := buildUserPrompt(ticketContext, diff, previous)
 
-	resp, err := r.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-		Model:       r.model,
-		Temperature: temperature,
-		Messages: []openai.ChatCompletionMessage{
-			{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
-			{Role: openai.ChatMessageRoleUser, Content: userPrompt},
-		},
-	})
+	resp, err := r.client.Chat.Completions.New(ctx, buildChatCompletionParams(r.model, r.reasoningEffort, systemPrompt, userPrompt, float64(temperature)))
 	if err != nil {
-		return "", AgentTraceMessage{}, fmt.Errorf("running %s agent: %w", agent, err)
+		return "", AgentTraceMessage{}, wrapAgentRunError(agent, err)
 	}
 	if len(resp.Choices) == 0 {
-		return "", AgentTraceMessage{}, fmt.Errorf("running %s agent: empty response", agent)
+		return "", AgentTraceMessage{}, emptyAgentResponseError(agent)
 	}
 
 	output := resp.Choices[0].Message.Content
 	return output, buildAgentTraceMessage(agent, systemPrompt, userPrompt, output, r.includePrompts), nil
+}
+
+func buildChatCompletionParams(model, reasoningEffort, systemPrompt, userPrompt string, temperature float64) openai.ChatCompletionNewParams {
+	params := openai.ChatCompletionNewParams{
+		Model: openai.ChatModel(model),
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.SystemMessage(systemPrompt),
+			openai.UserMessage(userPrompt),
+		},
+	}
+	if reasoningEffort != "" {
+		params.ReasoningEffort = shared.ReasoningEffort(reasoningEffort)
+	}
+	return params
+}
+
+func wrapAgentRunError(agent string, err error) error {
+	return fmt.Errorf("running %s agent: %w", agent, err)
+}
+
+func emptyAgentResponseError(agent string) error {
+	return fmt.Errorf("running %s agent: empty response", agent)
 }
 
 func buildAgentTraceMessage(agent, systemPrompt, userPrompt, output string, includePrompts bool) AgentTraceMessage {
@@ -229,7 +249,7 @@ func parseSectionHeader(line string) (string, string, bool) {
 }
 
 func parseTextSection(lines []string) []string {
-	if len(lines) == 1 && lines[0] == "None" {
+	if isNoneSection(lines) {
 		return nil
 	}
 
@@ -241,7 +261,7 @@ func parseTextSection(lines []string) []string {
 }
 
 func parseIssueSection(severity string, lines []string) ([]Issue, error) {
-	if len(lines) == 1 && lines[0] == "None" {
+	if isNoneSection(lines) {
 		return nil, nil
 	}
 
@@ -254,6 +274,10 @@ func parseIssueSection(severity string, lines []string) ([]Issue, error) {
 		issues = append(issues, issue)
 	}
 	return issues, nil
+}
+
+func isNoneSection(lines []string) bool {
+	return len(lines) == 1 && strings.TrimPrefix(lines[0], "- ") == "None"
 }
 
 func parseIssueLine(severity, line string) (Issue, error) {

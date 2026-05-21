@@ -1,10 +1,13 @@
 package agents
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/openai/openai-go/v3/shared"
 )
 
 func TestParseModeratorOutputParsesSectionsAndLocations(t *testing.T) {
@@ -67,6 +70,34 @@ No findings.`
 	}
 	if len(result.Blockers) != 0 || len(result.Warnings) != 0 || len(result.Suggestions) != 0 || len(result.Assumptions) != 0 {
 		t.Fatalf("expected empty sections, got %#v", result)
+	}
+}
+
+func TestParseModeratorOutputHandlesBulletedNoneIssueSections(t *testing.T) {
+	output := `TICKET_COVERAGE:
+:white_check_mark: All criteria covered
+
+BLOCKERS:
+- None
+
+WARNINGS:
+- None
+
+SUGGESTIONS:
+- None
+
+ASSUMPTIONS:
+None
+
+SUMMARY:
+No findings.`
+
+	result, err := ParseModeratorOutput(output)
+	if err != nil {
+		t.Fatalf("ParseModeratorOutput() error = %v", err)
+	}
+	if len(result.Blockers) != 0 || len(result.Warnings) != 0 || len(result.Suggestions) != 0 {
+		t.Fatalf("expected empty issue sections, got %#v", result)
 	}
 }
 
@@ -167,5 +198,57 @@ func TestBuildAgentTraceMessageIncludesPromptsWhenPromptCaptureIsEnabled(t *test
 
 	if message.SystemPrompt != "system" || message.UserPrompt != "user" {
 		t.Fatalf("prompts = %q/%q, want populated", message.SystemPrompt, message.UserPrompt)
+	}
+}
+
+func TestBuildChatCompletionParamsIncludesReasoningEffortWhenConfigured(t *testing.T) {
+	params := buildChatCompletionParams("gpt-5.5", "high", "system prompt", "user prompt", 0.3)
+
+	if string(params.Model) != "gpt-5.5" {
+		t.Fatalf("Model = %q, want gpt-5.5", params.Model)
+	}
+	if params.ReasoningEffort != shared.ReasoningEffortHigh {
+		t.Fatalf("ReasoningEffort = %q, want high", params.ReasoningEffort)
+	}
+	if len(params.Messages) != 2 {
+		t.Fatalf("Messages length = %d, want 2", len(params.Messages))
+	}
+}
+
+func TestBuildChatCompletionParamsOmitsReasoningEffortWhenEmpty(t *testing.T) {
+	params := buildChatCompletionParams("gpt-4o", "", "system prompt", "user prompt", 0.3)
+
+	if params.ReasoningEffort != "" {
+		t.Fatalf("ReasoningEffort = %q, want empty", params.ReasoningEffort)
+	}
+}
+
+func TestBuildChatCompletionParamsOmitsTemperature(t *testing.T) {
+	params := buildChatCompletionParams("gpt-5.5", "high", "system prompt", "user prompt", 0.3)
+
+	if params.Temperature.Valid() {
+		t.Fatalf("Temperature = %v, want omitted", params.Temperature)
+	}
+}
+
+func TestWrapAgentRunErrorPreservesRuntimeErrors(t *testing.T) {
+	err := wrapAgentRunError("Architect", errors.New("rate limited"))
+
+	if err == nil {
+		t.Fatal("wrapAgentRunError() error = nil, want wrapped error")
+	}
+	if err.Error() != "running Architect agent: rate limited" {
+		t.Fatalf("wrapAgentRunError() = %q", err.Error())
+	}
+}
+
+func TestEmptyAgentResponseErrorNamesAgent(t *testing.T) {
+	err := emptyAgentResponseError("Designer")
+
+	if err == nil {
+		t.Fatal("emptyAgentResponseError() error = nil, want empty response error")
+	}
+	if err.Error() != "running Designer agent: empty response" {
+		t.Fatalf("emptyAgentResponseError() = %q", err.Error())
 	}
 }

@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestLoadUsesDefaultsAndAllowsMissingSlackBotToken(t *testing.T) {
 	t.Setenv("SLACK_SIGNING_SECRET", "secret")
@@ -24,6 +27,9 @@ func TestLoadUsesDefaultsAndAllowsMissingSlackBotToken(t *testing.T) {
 	if cfg.OpenAIModel != DefaultOpenAIModel {
 		t.Fatalf("OpenAIModel = %q, want %q", cfg.OpenAIModel, DefaultOpenAIModel)
 	}
+	if cfg.OpenAIReasoningEffort != "" {
+		t.Fatalf("OpenAIReasoningEffort = %q, want empty", cfg.OpenAIReasoningEffort)
+	}
 	if cfg.ReviewTraceEnabled {
 		t.Fatal("ReviewTraceEnabled = true, want false")
 	}
@@ -35,6 +41,43 @@ func TestLoadUsesDefaultsAndAllowsMissingSlackBotToken(t *testing.T) {
 	}
 	if cfg.SlackBotToken != "" {
 		t.Fatalf("SlackBotToken = %q, want empty", cfg.SlackBotToken)
+	}
+}
+
+func TestLoadNormalisesConfiguredOpenAIReasoningEffort(t *testing.T) {
+	t.Setenv("SLACK_SIGNING_SECRET", "secret")
+	t.Setenv("GITLAB_TOKEN", "gitlab")
+	t.Setenv("JIRA_BASE_URL", "https://example.atlassian.net")
+	t.Setenv("JIRA_EMAIL", "user@example.com")
+	t.Setenv("JIRA_TOKEN", "jira")
+	t.Setenv("OPENAI_API_KEY", "openai")
+	t.Setenv("OPENAI_REASONING_EFFORT", " XHIGH ")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.OpenAIReasoningEffort != "xhigh" {
+		t.Fatalf("OpenAIReasoningEffort = %q, want %q", cfg.OpenAIReasoningEffort, "xhigh")
+	}
+}
+
+func TestLoadFailsForUnsupportedOpenAIReasoningEffort(t *testing.T) {
+	t.Setenv("SLACK_SIGNING_SECRET", "secret")
+	t.Setenv("GITLAB_TOKEN", "gitlab")
+	t.Setenv("JIRA_BASE_URL", "https://example.atlassian.net")
+	t.Setenv("JIRA_EMAIL", "user@example.com")
+	t.Setenv("JIRA_TOKEN", "jira")
+	t.Setenv("OPENAI_API_KEY", "openai")
+	t.Setenv("OPENAI_REASONING_EFFORT", "maximum")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want reasoning effort validation error")
+	}
+	if !strings.Contains(err.Error(), "OPENAI_REASONING_EFFORT must be one of low, medium, high, or xhigh") {
+		t.Fatalf("Load() error = %v, want clear reasoning effort validation error", err)
 	}
 }
 

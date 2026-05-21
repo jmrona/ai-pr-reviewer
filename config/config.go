@@ -31,6 +31,7 @@ type Config struct {
 	JiraToken                 string
 	OpenAIAPIKey              string
 	OpenAIModel               string
+	OpenAIReasoningEffort     string
 	ReviewTraceEnabled        bool
 	ReviewTraceDir            string
 	ReviewTraceIncludePrompts bool
@@ -48,6 +49,7 @@ func Load() (Config, error) {
 		JiraToken:                 os.Getenv("JIRA_TOKEN"),
 		OpenAIAPIKey:              os.Getenv("OPENAI_API_KEY"),
 		OpenAIModel:               valueOrDefault("OPENAI_MODEL", DefaultOpenAIModel),
+		OpenAIReasoningEffort:     normaliseOpenAIReasoningEffort(os.Getenv("OPENAI_REASONING_EFFORT")),
 		ReviewTraceEnabled:        parseBool("REVIEW_TRACE_ENABLED"),
 		ReviewTraceDir:            valueOrDefault("REVIEW_TRACE_DIR", DefaultReviewTraceDir),
 		ReviewTraceIncludePrompts: parseBool("REVIEW_TRACE_INCLUDE_PROMPTS"),
@@ -69,6 +71,9 @@ func Load() (Config, error) {
 
 	if len(missing) > 0 {
 		return Config{}, fmt.Errorf("missing required environment variables: %s", strings.Join(missing, ", "))
+	}
+	if !isValidOpenAIReasoningEffort(cfg.OpenAIReasoningEffort) {
+		return Config{}, errors.New("OPENAI_REASONING_EFFORT must be one of low, medium, high, or xhigh")
 	}
 
 	return cfg, nil
@@ -93,6 +98,19 @@ func valueOrDefault(name, fallback string) string {
 func parseBool(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
 	case "true", "1", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+func normaliseOpenAIReasoningEffort(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func isValidOpenAIReasoningEffort(value string) bool {
+	switch value {
+	case "", "low", "medium", "high", "xhigh":
 		return true
 	default:
 		return false

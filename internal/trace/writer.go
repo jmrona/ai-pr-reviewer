@@ -78,6 +78,7 @@ func renderMarkdown(input TraceInput, createdAt time.Time, includePrompts bool) 
 	writeField(&b, "MR URL", input.MRURL)
 	writeField(&b, "Timestamp", createdAt.Format(time.RFC3339))
 	writeField(&b, "Model", outcome.Trace.Model)
+	writeField(&b, "Reasoning effort", outcome.Trace.ReasoningEffort)
 	writeField(&b, "Diff truncated", fmt.Sprintf("%t", input.DiffTruncated))
 	if includePrompts {
 		writeField(&b, "Prompt capture", "enabled")

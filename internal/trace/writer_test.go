@@ -48,6 +48,7 @@ func TestWriterCreatesDirectoryAndFileWithSanitisedFilenameAndSections(t *testin
 		"MR URL: https://gitlab.example.com/project/-/merge_requests/7",
 		"Timestamp: 2026-05-21T21:30:45Z",
 		"Model: gpt-test",
+		"Reasoning effort: high",
 		"Diff truncated: true",
 		"Prompt capture: enabled",
 		"## Ticket Context",
@@ -209,6 +210,7 @@ func reviewOutcome(includePrompts bool) agents.ReviewOutcome {
 		},
 		Trace: agents.ReviewTrace{
 			Model:           "gpt-test",
+			ReasoningEffort: "high",
 			IncludePrompts:  includePrompts,
 			AgentMessages:   []agents.AgentTraceMessage{message},
 			ModeratorOutput: "moderator output",
