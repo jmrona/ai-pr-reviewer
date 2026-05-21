@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	DefaultPort          = "8080"
-	DefaultGitLabBaseURL = "https://gitlab.com"
-	DefaultOpenAIModel   = "gpt-4o"
+	DefaultPort           = "8080"
+	DefaultGitLabBaseURL  = "https://gitlab.com"
+	DefaultOpenAIModel    = "gpt-4o"
+	DefaultReviewTraceDir = ".review-traces"
 
 	ServerReadTimeout   = 5 * time.Second
 	ServerWriteTimeout  = 10 * time.Second
@@ -20,30 +21,36 @@ const (
 )
 
 type Config struct {
-	Port               string
-	SlackBotToken      string
-	SlackSigningSecret string
-	GitLabToken        string
-	GitLabBaseURL      string
-	JiraBaseURL        string
-	JiraEmail          string
-	JiraToken          string
-	OpenAIAPIKey       string
-	OpenAIModel        string
+	Port                      string
+	SlackBotToken             string
+	SlackSigningSecret        string
+	GitLabToken               string
+	GitLabBaseURL             string
+	JiraBaseURL               string
+	JiraEmail                 string
+	JiraToken                 string
+	OpenAIAPIKey              string
+	OpenAIModel               string
+	ReviewTraceEnabled        bool
+	ReviewTraceDir            string
+	ReviewTraceIncludePrompts bool
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Port:               valueOrDefault("PORT", DefaultPort),
-		SlackBotToken:      os.Getenv("SLACK_BOT_TOKEN"),
-		SlackSigningSecret: os.Getenv("SLACK_SIGNING_SECRET"),
-		GitLabToken:        os.Getenv("GITLAB_TOKEN"),
-		GitLabBaseURL:      valueOrDefault("GITLAB_BASE_URL", DefaultGitLabBaseURL),
-		JiraBaseURL:        os.Getenv("JIRA_BASE_URL"),
-		JiraEmail:          os.Getenv("JIRA_EMAIL"),
-		JiraToken:          os.Getenv("JIRA_TOKEN"),
-		OpenAIAPIKey:       os.Getenv("OPENAI_API_KEY"),
-		OpenAIModel:        valueOrDefault("OPENAI_MODEL", DefaultOpenAIModel),
+		Port:                      valueOrDefault("PORT", DefaultPort),
+		SlackBotToken:             os.Getenv("SLACK_BOT_TOKEN"),
+		SlackSigningSecret:        os.Getenv("SLACK_SIGNING_SECRET"),
+		GitLabToken:               os.Getenv("GITLAB_TOKEN"),
+		GitLabBaseURL:             valueOrDefault("GITLAB_BASE_URL", DefaultGitLabBaseURL),
+		JiraBaseURL:               os.Getenv("JIRA_BASE_URL"),
+		JiraEmail:                 os.Getenv("JIRA_EMAIL"),
+		JiraToken:                 os.Getenv("JIRA_TOKEN"),
+		OpenAIAPIKey:              os.Getenv("OPENAI_API_KEY"),
+		OpenAIModel:               valueOrDefault("OPENAI_MODEL", DefaultOpenAIModel),
+		ReviewTraceEnabled:        parseBool("REVIEW_TRACE_ENABLED"),
+		ReviewTraceDir:            valueOrDefault("REVIEW_TRACE_DIR", DefaultReviewTraceDir),
+		ReviewTraceIncludePrompts: parseBool("REVIEW_TRACE_INCLUDE_PROMPTS"),
 	}
 
 	var missing []string
@@ -81,6 +88,15 @@ func valueOrDefault(name, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func parseBool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "true", "1", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 func IsMissingConfigError(err error) bool {

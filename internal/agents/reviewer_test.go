@@ -64,3 +64,48 @@ No findings.`
 		t.Fatalf("expected empty sections, got %#v", result)
 	}
 }
+
+func TestParseModeratorOutputParsesInlineSectionValues(t *testing.T) {
+	output := `TICKET_COVERAGE: :white_check_mark: All criteria covered
+
+BLOCKERS: None
+
+WARNINGS: None
+
+SUGGESTIONS: None
+
+ASSUMPTIONS: None
+
+SUMMARY: Safe to merge.`
+
+	result, err := ParseModeratorOutput(output)
+	if err != nil {
+		t.Fatalf("ParseModeratorOutput() error = %v", err)
+	}
+
+	if result.TicketCoverage != ":white_check_mark: All criteria covered" {
+		t.Fatalf("TicketCoverage = %q", result.TicketCoverage)
+	}
+	if result.Summary != "Safe to merge." {
+		t.Fatalf("Summary = %q", result.Summary)
+	}
+}
+
+func TestBuildAgentTraceMessageOmitsPromptsWhenPromptCaptureIsDisabled(t *testing.T) {
+	message := buildAgentTraceMessage("Pragmatist", "system", "user", "output", false)
+
+	if message.Agent != "Pragmatist" || message.Output != "output" {
+		t.Fatalf("trace message = %#v", message)
+	}
+	if message.SystemPrompt != "" || message.UserPrompt != "" {
+		t.Fatalf("prompts = %q/%q, want empty strings", message.SystemPrompt, message.UserPrompt)
+	}
+}
+
+func TestBuildAgentTraceMessageIncludesPromptsWhenPromptCaptureIsEnabled(t *testing.T) {
+	message := buildAgentTraceMessage("Architect", "system", "user", "output", true)
+
+	if message.SystemPrompt != "system" || message.UserPrompt != "user" {
+		t.Fatalf("prompts = %q/%q, want populated", message.SystemPrompt, message.UserPrompt)
+	}
+}

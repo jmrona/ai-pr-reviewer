@@ -1,7 +1,9 @@
 package gitlab
 
 import (
+	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -50,6 +52,30 @@ func TestFormatDiffTruncatesEachFile(t *testing.T) {
 	}
 	if !stringsContains(formatted, "[diff truncated at 3000 characters]") {
 		t.Fatalf("formatted diff missing truncation marker: %q", formatted)
+	}
+}
+
+func TestGetMRChangesEscapesProjectPathOnce(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		_, _ = w.Write([]byte(`{"changes":[]}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "token", server.Client())
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	_, err = client.GetMRChanges(context.Background(), "platform/application", 108)
+	if err != nil {
+		t.Fatalf("GetMRChanges() error = %v", err)
+	}
+
+	wantPath := "/api/v4/projects/platform%2Fapplication/merge_requests/108/changes"
+	if gotPath != wantPath {
+		t.Fatalf("request path = %q, want %q", gotPath, wantPath)
 	}
 }
 

@@ -32,3 +32,4 @@ Moderation rules:
 - If evidence is incomplete, state the assumption or limitation and continue from provided evidence.
 - Keep the final answer concise, actionable, severity-labelled, and Slack friendly.
 - Do not depend on more information.
+- Use British English always.

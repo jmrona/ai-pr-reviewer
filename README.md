@@ -53,6 +53,9 @@ All configuration is read from environment variables.
 | `JIRA_TOKEN` | Yes | | Jira API token. |
 | `OPENAI_API_KEY` | Yes | | OpenAI API key. |
 | `OPENAI_MODEL` | No | `gpt-4o` | OpenAI model used for every agent round. |
+| `REVIEW_TRACE_ENABLED` | No | `false` | Enables local review trace diagnostics. |
+| `REVIEW_TRACE_DIR` | No | `.review-traces` | Directory where review traces are written when enabled. |
+| `REVIEW_TRACE_INCLUDE_PROMPTS` | No | `false` | Includes agent prompt content in trace output when tracing is enabled. |
 
 ## Slack App Setup
 
@@ -136,6 +139,7 @@ Tests use local fakes and `httptest`. They do not call live Slack, GitLab, Jira,
 - Requests older than 5 minutes or more than 5 minutes in the future are rejected.
 - Secrets are read from environment variables only.
 - Error messages posted to Slack avoid tokens, auth headers, and full third-party response bodies.
+- Review traces are local diagnostics, disabled by default, and can contain ticket, diff, prompt, and model output data.
 
 ## Current Limitations
 

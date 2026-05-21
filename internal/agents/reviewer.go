@@ -33,78 +33,116 @@ type ReviewResult struct {
 	DiffTruncated  bool
 }
 
-type OpenAIReviewer struct {
-	client *openai.Client
-	model  string
-	skills map[string]string
+type ReviewOutcome struct {
+	Result ReviewResult
+	Trace  ReviewTrace
 }
 
-func NewOpenAIReviewer(apiKey, model string, skills map[string]string) *OpenAIReviewer {
+type ReviewTrace struct {
+	Model           string
+	IncludePrompts  bool
+	AgentMessages   []AgentTraceMessage
+	ModeratorOutput string
+}
+
+type AgentTraceMessage struct {
+	Agent        string
+	SystemPrompt string
+	UserPrompt   string
+	Output       string
+}
+
+type OpenAIReviewer struct {
+	client         *openai.Client
+	model          string
+	skills         map[string]string
+	includePrompts bool
+}
+
+func NewOpenAIReviewer(apiKey, model string, skills map[string]string, includePrompts bool) *OpenAIReviewer {
 	return &OpenAIReviewer{
-		client: openai.NewClient(apiKey),
-		model:  model,
-		skills: skills,
+		client:         openai.NewClient(apiKey),
+		model:          model,
+		skills:         skills,
+		includePrompts: includePrompts,
 	}
 }
 
-func (r *OpenAIReviewer) Review(ctx context.Context, ticketContext, diff string, diffTruncated bool) (ReviewResult, error) {
+func (r *OpenAIReviewer) Review(ctx context.Context, ticketContext, diff string, diffTruncated bool) (ReviewOutcome, error) {
 	debate := make([]AgentMessage, 0, 3)
+	trace := ReviewTrace{Model: r.model, IncludePrompts: r.includePrompts, AgentMessages: make([]AgentTraceMessage, 0, 4)}
 
-	pragmatist, err := r.runAgent(ctx, "Pragmatist", "pragmatist", ticketContext, diff, nil, 0.3)
+	pragmatist, pragmatistTrace, err := r.runAgent(ctx, "Pragmatist", "pragmatist", ticketContext, diff, nil, 0.3)
 	if err != nil {
-		return ReviewResult{}, err
+		return ReviewOutcome{}, err
 	}
 	debate = append(debate, AgentMessage{Agent: "Pragmatist", Content: pragmatist})
+	trace.AgentMessages = append(trace.AgentMessages, pragmatistTrace)
 
-	architect, err := r.runAgent(ctx, "Architect", "architect", ticketContext, diff, debate, 0.3)
+	architect, architectTrace, err := r.runAgent(ctx, "Architect", "architect", ticketContext, diff, debate, 0.3)
 	if err != nil {
-		return ReviewResult{}, err
+		return ReviewOutcome{}, err
 	}
 	debate = append(debate, AgentMessage{Agent: "Architect", Content: architect})
+	trace.AgentMessages = append(trace.AgentMessages, architectTrace)
 
-	designer, err := r.runAgent(ctx, "Designer", "designer", ticketContext, diff, debate, 0.3)
+	designer, designerTrace, err := r.runAgent(ctx, "Designer", "designer", ticketContext, diff, debate, 0.3)
 	if err != nil {
-		return ReviewResult{}, err
+		return ReviewOutcome{}, err
 	}
 	debate = append(debate, AgentMessage{Agent: "Designer", Content: designer})
+	trace.AgentMessages = append(trace.AgentMessages, designerTrace)
 
-	moderator, err := r.runAgent(ctx, "Moderator", "moderator", ticketContext, diff, debate, 0.1)
+	moderator, moderatorTrace, err := r.runAgent(ctx, "Moderator", "moderator", ticketContext, diff, debate, 0.1)
 	if err != nil {
-		return ReviewResult{}, err
+		return ReviewOutcome{}, err
 	}
+	trace.AgentMessages = append(trace.AgentMessages, moderatorTrace)
+	trace.ModeratorOutput = moderator
 
 	result, err := ParseModeratorOutput(moderator)
 	if err != nil {
-		return ReviewResult{}, fmt.Errorf("parsing moderator output: %w", err)
+		return ReviewOutcome{Trace: trace}, fmt.Errorf("parsing moderator output: %w", err)
 	}
 	result.AgentDebate = debate
 	result.DiffTruncated = diffTruncated
 
-	return result, nil
+	return ReviewOutcome{Result: result, Trace: trace}, nil
 }
 
-func (r *OpenAIReviewer) runAgent(ctx context.Context, agent, role, ticketContext, diff string, previous []AgentMessage, temperature float32) (string, error) {
+func (r *OpenAIReviewer) runAgent(ctx context.Context, agent, role, ticketContext, diff string, previous []AgentMessage, temperature float32) (string, AgentTraceMessage, error) {
 	systemPrompt, err := ComposeSystemPrompt(r.skills, role)
 	if err != nil {
-		return "", err
+		return "", AgentTraceMessage{}, err
 	}
+	userPrompt := buildUserPrompt(ticketContext, diff, previous)
 
 	resp, err := r.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model:       r.model,
 		Temperature: temperature,
 		Messages: []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
-			{Role: openai.ChatMessageRoleUser, Content: buildUserPrompt(ticketContext, diff, previous)},
+			{Role: openai.ChatMessageRoleUser, Content: userPrompt},
 		},
 	})
 	if err != nil {
-		return "", fmt.Errorf("running %s agent: %w", agent, err)
+		return "", AgentTraceMessage{}, fmt.Errorf("running %s agent: %w", agent, err)
 	}
 	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("running %s agent: empty response", agent)
+		return "", AgentTraceMessage{}, fmt.Errorf("running %s agent: empty response", agent)
 	}
 
-	return resp.Choices[0].Message.Content, nil
+	output := resp.Choices[0].Message.Content
+	return output, buildAgentTraceMessage(agent, systemPrompt, userPrompt, output, r.includePrompts), nil
+}
+
+func buildAgentTraceMessage(agent, systemPrompt, userPrompt, output string, includePrompts bool) AgentTraceMessage {
+	message := AgentTraceMessage{Agent: agent, Output: output}
+	if includePrompts {
+		message.SystemPrompt = systemPrompt
+		message.UserPrompt = userPrompt
+	}
+	return message
 }
 
 func buildUserPrompt(ticketContext, diff string, previous []AgentMessage) string {
@@ -134,14 +172,17 @@ func ParseModeratorOutput(output string) (ReviewResult, error) {
 
 	for _, rawLine := range strings.Split(output, "\n") {
 		line := strings.TrimSpace(rawLine)
-		switch line {
-		case "TICKET_COVERAGE:", "BLOCKERS:", "WARNINGS:", "SUGGESTIONS:", "ASSUMPTIONS:", "SUMMARY:":
-			current = strings.TrimSuffix(line, ":")
+		if section, value, ok := parseSectionHeader(line); ok {
+			current = section
 			sections[current] = []string{}
-		default:
-			if current != "" && line != "" {
-				sections[current] = append(sections[current], line)
+			if value != "" {
+				sections[current] = append(sections[current], value)
 			}
+			continue
+		}
+
+		if current != "" && line != "" {
+			sections[current] = append(sections[current], line)
 		}
 	}
 
@@ -172,6 +213,19 @@ func ParseModeratorOutput(output string) (ReviewResult, error) {
 		Assumptions:    parseTextSection(sections["ASSUMPTIONS"]),
 		Summary:        strings.Join(sections["SUMMARY"], "\n"),
 	}, nil
+}
+
+func parseSectionHeader(line string) (string, string, bool) {
+	for _, section := range []string{"TICKET_COVERAGE", "BLOCKERS", "WARNINGS", "SUGGESTIONS", "ASSUMPTIONS", "SUMMARY"} {
+		prefix := section + ":"
+		if line == prefix {
+			return section, "", true
+		}
+		if strings.HasPrefix(line, prefix+" ") {
+			return section, strings.TrimSpace(strings.TrimPrefix(line, prefix)), true
+		}
+	}
+	return "", "", false
 }
 
 func parseTextSection(lines []string) []string {

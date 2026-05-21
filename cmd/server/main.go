@@ -11,6 +11,7 @@ import (
 	"github.com/example/ai-pr-reviewer/internal/jira"
 	"github.com/example/ai-pr-reviewer/internal/review"
 	"github.com/example/ai-pr-reviewer/internal/slack"
+	"github.com/example/ai-pr-reviewer/internal/trace"
 	"github.com/example/ai-pr-reviewer/internal/webhook"
 )
 
@@ -41,9 +42,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	reviewer := agents.NewOpenAIReviewer(cfg.OpenAIAPIKey, cfg.OpenAIModel, skills)
+	reviewer := agents.NewOpenAIReviewer(cfg.OpenAIAPIKey, cfg.OpenAIModel, skills, cfg.ReviewTraceIncludePrompts)
 	poster := slack.NewPoster(httpClient)
-	orchestrator := review.NewOrchestrator(gitlabClient, jiraClient, reviewer, poster, logger)
+	orchestratorOptions := []review.OrchestratorOption{}
+	if cfg.ReviewTraceEnabled {
+		traceWriter := trace.NewWriter(cfg.ReviewTraceEnabled, cfg.ReviewTraceDir, cfg.ReviewTraceIncludePrompts, []string{
+			cfg.SlackSigningSecret,
+			cfg.SlackBotToken,
+			cfg.GitLabToken,
+			cfg.JiraToken,
+			cfg.OpenAIAPIKey,
+		})
+		orchestratorOptions = append(orchestratorOptions, review.WithTraceWriter(traceWriter))
+	}
+	orchestrator := review.NewOrchestrator(gitlabClient, jiraClient, reviewer, poster, logger, orchestratorOptions...)
 	handler := webhook.NewHandler(cfg.SlackSigningSecret, gitlabClient, jiraClient, orchestrator, logger)
 
 	mux := http.NewServeMux()

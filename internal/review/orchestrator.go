@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"time"
 
 	"github.com/example/ai-pr-reviewer/internal/agents"
 	"github.com/example/ai-pr-reviewer/internal/slack"
+	"github.com/example/ai-pr-reviewer/internal/trace"
 )
 
 type Request struct {
@@ -27,23 +29,40 @@ type TicketFetcher interface {
 }
 
 type Reviewer interface {
-	Review(ctx context.Context, ticketContext, diff string, diffTruncated bool) (agents.ReviewResult, error)
+	Review(ctx context.Context, ticketContext, diff string, diffTruncated bool) (agents.ReviewOutcome, error)
 }
 
 type SlackPoster interface {
 	Post(ctx context.Context, responseURL, text string) error
 }
 
-type Orchestrator struct {
-	changes  ChangeFetcher
-	tickets  TicketFetcher
-	reviewer Reviewer
-	poster   SlackPoster
-	logger   *slog.Logger
+type TraceWriter interface {
+	Write(ctx context.Context, input trace.TraceInput) (string, error)
 }
 
-func NewOrchestrator(changes ChangeFetcher, tickets TicketFetcher, reviewer Reviewer, poster SlackPoster, logger *slog.Logger) *Orchestrator {
-	return &Orchestrator{changes: changes, tickets: tickets, reviewer: reviewer, poster: poster, logger: logger}
+type OrchestratorOption func(*Orchestrator)
+
+type Orchestrator struct {
+	changes     ChangeFetcher
+	tickets     TicketFetcher
+	reviewer    Reviewer
+	poster      SlackPoster
+	logger      *slog.Logger
+	traceWriter TraceWriter
+}
+
+func NewOrchestrator(changes ChangeFetcher, tickets TicketFetcher, reviewer Reviewer, poster SlackPoster, logger *slog.Logger, options ...OrchestratorOption) *Orchestrator {
+	orchestrator := &Orchestrator{changes: changes, tickets: tickets, reviewer: reviewer, poster: poster, logger: logger}
+	for _, option := range options {
+		option(orchestrator)
+	}
+	return orchestrator
+}
+
+func WithTraceWriter(traceWriter TraceWriter) OrchestratorOption {
+	return func(orchestrator *Orchestrator) {
+		orchestrator.traceWriter = traceWriter
+	}
 }
 
 func (o *Orchestrator) Process(ctx context.Context, req Request) {
@@ -74,19 +93,47 @@ func (o *Orchestrator) process(ctx context.Context, req Request) error {
 	}
 
 	o.logger.InfoContext(ctx, "running OpenAI review")
-	result, err := o.reviewer.Review(ctx, ticketContext, diff, truncated)
+	outcome, err := o.reviewer.Review(ctx, ticketContext, diff, truncated)
 	if err != nil {
 		return fmt.Errorf("OpenAI review failed: %w", err)
 	}
+	result := outcome.Result
 	result.DiffTruncated = truncated
+	outcome.Result = result
 
 	message := slack.FormatReviewResult(result, req.IssueKey, req.MRURL)
+	o.writeTrace(ctx, req, ticketContext, diff, truncated, outcome, message)
+
 	o.logger.InfoContext(ctx, "posting Slack review result")
 	if err := o.poster.Post(ctx, req.ResponseURL, message); err != nil {
 		return fmt.Errorf("Slack callback failed: %w", err)
 	}
 
 	return nil
+}
+
+func (o *Orchestrator) writeTrace(ctx context.Context, req Request, ticketContext, diff string, truncated bool, outcome agents.ReviewOutcome, message string) {
+	if o.traceWriter == nil {
+		return
+	}
+
+	path, err := o.traceWriter.Write(ctx, trace.TraceInput{
+		IssueKey:      req.IssueKey,
+		MRURL:         req.MRURL,
+		TicketContext: ticketContext,
+		Diff:          diff,
+		DiffTruncated: truncated,
+		ReviewOutcome: outcome,
+		SlackMessage:  message,
+		CreatedAt:     time.Now(),
+	})
+	if err != nil {
+		o.logger.ErrorContext(ctx, "writing review trace failed", slog.String("error", err.Error()))
+		return
+	}
+	if path != "" {
+		o.logger.InfoContext(ctx, "wrote review trace", slog.String("path", path))
+	}
 }
 
 func (o *Orchestrator) postError(ctx context.Context, responseURL, message string) {
