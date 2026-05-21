@@ -8,3 +8,6 @@ coverage.out
 *.log
 .review-traces/
 .DS_Store
+
+APPROVED_DESIGN.md
+APPROVED_DESIGN.md
