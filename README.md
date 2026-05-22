@@ -158,6 +158,8 @@ None found.
 ## Summary
 
 Safe to merge. The implementation covers the main ticket intent, no blockers or warnings were found, and the remaining items are suggestions or scope assumptions.
+
+Review completed in 1m46s
 ```
 
 ## Docker
