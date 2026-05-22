@@ -113,6 +113,38 @@ If no healthy server is running, the helper starts `go run ./cmd/server`, forces
 
 The helper prompts on stderr for the GitLab MR URL and Jira ticket URL. Progress, prompts, errors, and diagnostics are written to stderr. On success, stdout contains only the extracted content between `## Parsed Review Result` and `## Final Slack Message` from the newest matching trace.
 
+#### Example output
+
+```markdown
+## Ticket Coverage
+
+Partially covered. The merge request updates the service contract, generated client files, application checks, dashboard layout, widget settings, and audit event handling. It does not appear to include every optional review view refinement described by the ticket.
+
+## Blockers
+
+None found.
+
+## Warnings
+
+None found.
+
+## Suggestions
+
+- Consider confirming whether the omitted review view refinements are intentionally deferred.
+- Consider adding a focused unit test around the new widget settings behaviour if it is expected to remain stable.
+- Consider documenting when consumer files should be regenerated after service contract changes.
+
+## Assumptions
+
+- The generated client files were produced by the repository's normal generation command.
+- The existing API checks and application checks cover the service contract change.
+- The ticket allows the remaining review view refinements to be handled separately.
+
+## Summary
+
+Safe to merge. The implementation covers the main ticket intent, no blockers or warnings were found, and the remaining items are suggestions or scope assumptions.
+```
+
 ## Docker
 
 Build the image:
