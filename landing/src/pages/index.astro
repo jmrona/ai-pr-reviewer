@@ -104,12 +104,26 @@ const installCommand = `ai-reviewer() {
       </section>
 
       <section class="overview panel" aria-labelledby="overview-title">
-        <div>
+        <div class="overview__copy">
           <p class="eyebrow">Architecture map</p>
           <h2 id="overview-title">GitLab + Jira + Slack, moderated by agents.</h2>
           <p>
             The service stays stateless: Slack verifies the command, GitLab and Jira provide context, specialist agents review in parallel, and Slack receives the final answer.
           </p>
+          <div class="flow-terminal" aria-label="Synced local terminal progress">
+            <div class="flow-terminal__bar">
+              <span></span><span></span><span></span>
+              <strong>local-review</strong>
+            </div>
+            <ol>
+              <li class="terminal-step terminal-step--command" style="--cursor: 21ch"><span><span>$</span> ai-reviewer --rounds 2</span></li>
+              <li class="terminal-step terminal-step--fetch" style="--cursor: 24ch"><span><span>[review]</span> Fetching context...</span></li>
+              <li class="terminal-step terminal-step--round-one" style="--cursor: 28ch"><span><span>[review]</span> Round 1 specialists...</span></li>
+              <li class="terminal-step terminal-step--round-two" style="--cursor: 28ch"><span><span>[review]</span> Round 2 specialists...</span></li>
+              <li class="terminal-step terminal-step--moderator" style="--cursor: 27ch"><span><span>[review]</span> Running Moderator...</span></li>
+              <li class="terminal-step terminal-step--output" style="--cursor: 24ch"><span><span>result</span> Review report ready.</span></li>
+            </ol>
+          </div>
         </div>
         <div class="flow-map" aria-label="AI PR Reviewer architecture flow">
           <div class="flow-rail" aria-hidden="true">
