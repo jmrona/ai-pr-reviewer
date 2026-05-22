@@ -1,0 +1,166 @@
+---
+import '../styles/global.css';
+
+const features = [
+  {
+    label: 'Local progress',
+    title: 'Watch the review run',
+    copy: 'Terminal progress lines show context fetching, review rounds, Moderator work, trace writing, and elapsed phase timings.'
+  },
+  {
+    label: 'Review rounds',
+    title: 'Debate before verdict',
+    copy: 'Pragmatist, Designer, and Architect agents run in parallel, then optionally challenge and revise their findings in a second round.'
+  },
+  {
+    label: 'Trace files',
+    title: 'Debug every decision',
+    copy: 'Local traces preserve ticket context, diff excerpts, prompts when enabled, agent output, durations, and the final Slack payload.'
+  },
+  {
+    label: 'Stateless service',
+    title: 'No queue. No database.',
+    copy: 'Slack slash commands are verified, processed asynchronously, and posted back through the supplied response URL.'
+  }
+];
+
+const steps = [
+  ['01', 'Fetch context', 'GitLab merge request changes and optional Jira ticket details are pulled into one review packet.'],
+  ['02', 'Run agents', 'Three specialist agents inspect correctness, design, architecture, security, UX, and test coverage.'],
+  ['03', 'Moderate', 'The Moderator consolidates the debate into blockers, warnings, suggestions, assumptions, and summary.'],
+  ['04', 'Ship result', 'The review is posted back to Slack or printed locally through the ai-reviewer terminal command.']
+];
+
+const heroTerminal = `$ ai-reviewer
+GitLab MR URL: https://gitlab/.../108
+Jira ticket: EMBER-342
+[review] Fetching MR context... [18s]
+[review] Running specialist round 1... [54s]
+[review] Running Moderator... [21s]
+
+✅ Ticket Coverage
+Safe to merge after resolving warnings.`;
+
+const demoTerminal = `[review] Fetching merge request context... [12s]
+[review] Fetching Jira issue... [2s]
+[review] Running specialist review round 1... [48s]
+[review] Running specialist review round 2... [53s]
+[review] Running Moderator... [19s]
+
+Ticket Coverage
+⚠️ Partially covered - generated output evidence missing.
+
+Summary
+Safe to merge after addressing warnings.`;
+
+const installCommand = `ai-reviewer() {
+  (cd /Users/<user-name>/<path-to-this-folder>/ai-pr-reviewer \\
+    && go run ./cmd/local-review "$@")
+}`;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="AI PR Reviewer is a terminal-friendly, multi-agent merge request reviewer for GitLab, Jira, and Slack workflows." />
+    <title>AI PR Reviewer | Multi-agent terminal code review</title>
+  </head>
+  <body>
+    <main>
+      <section class="hero shell-grid" aria-labelledby="hero-title">
+        <div class="hero__copy">
+          <p class="eyebrow">/usr/local/bin/ai-reviewer</p>
+          <h1 id="hero-title">Multi-agent PR review from your terminal.</h1>
+          <p class="hero__lead">
+            Pull GitLab diffs, Jira ticket intent, and team review scope into a parallel AI committee that returns one production-ready verdict.
+          </p>
+          <div class="hero__actions" aria-label="Primary actions">
+            <a class="button button--primary" href="#install">Install command</a>
+            <a class="button button--ghost" href="#demo">View terminal demo</a>
+          </div>
+          <div class="stats" aria-label="Review workflow highlights">
+            <span><strong>3</strong> specialist agents</span>
+            <span><strong>2</strong> max debate rounds</span>
+            <span><strong>1</strong> final decision</span>
+          </div>
+        </div>
+
+        <div class="hero__visual pixel-card" aria-label="Terminal review preview">
+          <div class="terminal chrome">
+            <div class="terminal__bar">
+              <span></span><span></span><span></span>
+              <strong>ai-reviewer</strong>
+            </div>
+            <pre><code>{heroTerminal}</code></pre>
+          </div>
+          <div class="bot" aria-hidden="true">
+            <div class="bot__antenna"></div>
+            <div class="bot__head"><span></span><span></span></div>
+            <div class="bot__body">{'</>'}</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="overview panel" aria-labelledby="overview-title">
+        <div>
+          <p class="eyebrow">Architecture map</p>
+          <h2 id="overview-title">GitLab + Jira + Slack, moderated by agents.</h2>
+          <p>
+            The service stays stateless: Slack verifies the command, GitLab and Jira provide context, specialist agents review in parallel, and Slack receives the final answer.
+          </p>
+        </div>
+        <img src="/ai-pr-reviewer-overview.webp" alt="AI PR Reviewer flow diagram showing GitLab, Jira, Slack, specialist agents, Moderator, and final Slack output" />
+      </section>
+
+      <section class="steps" aria-labelledby="steps-title">
+        <p class="eyebrow">How it works</p>
+        <h2 id="steps-title">One command, four phases.</h2>
+        <div class="step-grid">
+          {steps.map(([number, title, copy]) => (
+            <article class="step-card">
+              <span>{number}</span>
+              <h3>{title}</h3>
+              <p>{copy}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section class="features" aria-labelledby="features-title">
+        <p class="eyebrow">Features</p>
+        <h2 id="features-title">Built for review loops, not chat demos.</h2>
+        <div class="feature-grid">
+          {features.map((feature) => (
+            <article class="feature-card">
+              <p>{feature.label}</p>
+              <h3>{feature.title}</h3>
+              <span>{feature.copy}</span>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section id="demo" class="demo panel" aria-labelledby="demo-title">
+        <div>
+          <p class="eyebrow">Terminal output</p>
+          <h2 id="demo-title">Progress without losing the final report.</h2>
+          <p>
+            Progress, prompts, and diagnostics stay on stderr. The parsed review and elapsed summary stay on stdout for easy piping or sharing.
+          </p>
+        </div>
+        <pre class="demo__terminal"><code>{demoTerminal}</code></pre>
+      </section>
+
+      <section id="install" class="install" aria-labelledby="install-title">
+        <div class="install__copy">
+          <p class="eyebrow">Install locally</p>
+          <h2 id="install-title">Create a terminal command that works anywhere.</h2>
+          <p>Add this to your shell config and adjust the path if your clone lives elsewhere.</p>
+        </div>
+        <pre class="install__code"><code>{installCommand}</code></pre>
+      </section>
+    </main>
+  </body>
+</html>

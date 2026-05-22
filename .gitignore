@@ -2,6 +2,8 @@
 .env.*
 !.env.example
 bin/
+node_modules/
+.astro/
 dist/
 coverage.out
 *.test
@@ -9,6 +11,6 @@ coverage.out
 .local-review-server.log
 .review-traces/
 .DS_Store
+.opencode
 
-APPROVED_DESIGN.md
 APPROVED_DESIGN.md
