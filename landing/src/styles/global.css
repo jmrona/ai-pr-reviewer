@@ -11,7 +11,6 @@
   --pink: #fb3f8d;
   --text: #f8fafc;
   --muted: #a9b7d0;
-  --shadow: rgba(34, 211, 238, 0.24);
 }
 
 * {
@@ -182,8 +181,8 @@ a {
   border: 2px solid var(--line);
   box-shadow:
     0 0 0 4px rgba(3, 8, 23, 0.75),
-    14px 14px 0 rgba(139, 92, 246, 0.12),
-    0 0 44px var(--shadow);
+    10px 10px 0 rgba(139, 92, 246, 0.22),
+    16px 16px 0 rgba(3, 8, 23, 0.85);
 }
 
 .hero__visual {
