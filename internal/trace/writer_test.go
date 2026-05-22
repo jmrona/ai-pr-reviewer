@@ -53,6 +53,7 @@ func TestWriterCreatesDirectoryAndFileWithSanitisedFilenameAndSections(t *testin
 		"Timestamp: 2026-05-21T21:30:45Z",
 		"Model: gpt-test",
 		"Reasoning effort: high",
+		"Review rounds: 2",
 		"Diff truncated: true",
 		"Prompt capture: enabled",
 		"## Ticket Context",
@@ -61,7 +62,7 @@ func TestWriterCreatesDirectoryAndFileWithSanitisedFilenameAndSections(t *testin
 		"diff content",
 		"## Prompts",
 		"## Agent Outputs",
-		"### Pragmatist",
+		"### Round 2 - Pragmatist",
 		"agent output",
 		"## Moderator Output",
 		"moderator output",
@@ -145,7 +146,7 @@ func TestWriterWithPromptsEnabledWritesPromptSectionsAndContent(t *testing.T) {
 	}
 	content := string(contentBytes)
 
-	for _, want := range []string{"### Pragmatist", "#### System Prompt", "system prompt", "#### User Prompt", "user prompt"} {
+	for _, want := range []string{"### Round 2 - Pragmatist", "#### System Prompt", "system prompt", "#### User Prompt", "user prompt"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("trace content missing %q:\n%s", want, content)
 		}
@@ -191,7 +192,7 @@ func TestWriterRedactsConfiguredSecretsSlackHooksAuthorizationLinesAndBearerToke
 }
 
 func reviewOutcome(includePrompts bool) agents.ReviewOutcome {
-	message := agents.AgentTraceMessage{Agent: "Pragmatist", Output: "agent output"}
+	message := agents.AgentTraceMessage{Agent: "Round 2 - Pragmatist", Output: "agent output"}
 	if includePrompts {
 		message.SystemPrompt = "system prompt"
 		message.UserPrompt = "user prompt"
@@ -215,6 +216,7 @@ func reviewOutcome(includePrompts bool) agents.ReviewOutcome {
 		Trace: agents.ReviewTrace{
 			Model:           "gpt-test",
 			ReasoningEffort: "high",
+			ReviewRounds:    2,
 			IncludePrompts:  includePrompts,
 			AgentMessages:   []agents.AgentTraceMessage{message},
 			ModeratorOutput: "moderator output",

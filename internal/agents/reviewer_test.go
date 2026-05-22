@@ -1,10 +1,13 @@
 package agents
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/openai/openai-go/v3/shared"
@@ -408,6 +411,117 @@ func TestOpenAIReviewerPreservesNonZeroRequestReviewRounds(t *testing.T) {
 	}
 }
 
+func TestOpenAIReviewerRejectsInvalidResolvedReviewRounds(t *testing.T) {
+	reviewer := newFakeReviewer(3, nil)
+
+	_, err := reviewer.Review(context.Background(), "ticket", "diff", false, ReviewOptions{})
+
+	if err == nil {
+		t.Fatal("Review() error = nil, want invalid review rounds error")
+	}
+	if !strings.Contains(err.Error(), "invalid review rounds 3") || !strings.Contains(err.Error(), "1 or 2") {
+		t.Fatalf("Review() error = %q, want clear invalid rounds error", err.Error())
+	}
+}
+
+func TestOpenAIReviewerRunsOneRoundSpecialistsWithoutPriorAnalysisAndModeratesRoundOne(t *testing.T) {
+	fake := newRecordingCompletion()
+	reviewer := newFakeReviewer(1, fake.complete)
+
+	outcome, err := reviewer.Review(context.Background(), "ticket", "diff", false, ReviewOptions{})
+	if err != nil {
+		t.Fatalf("Review() error = %v", err)
+	}
+
+	for _, role := range []string{"pragmatist", "architect", "designer"} {
+		prompt := fake.specialistPrompt(t, role, 1)
+		if strings.Contains(prompt, "PRIOR ROUND AGENT ANALYSIS") || strings.Contains(prompt, "PREVIOUS AGENT ANALYSIS") {
+			t.Fatalf("round 1 %s prompt contains prior analysis: %q", role, prompt)
+		}
+	}
+
+	moderatorPrompt := fake.moderatorPrompt(t)
+	for _, want := range []string{"=== FINAL SPECIALIST AGENT ANALYSIS ===", "Pragmatist:\nround 1 pragmatist", "Architect:\nround 1 architect", "Designer:\nround 1 designer"} {
+		if !strings.Contains(moderatorPrompt, want) {
+			t.Fatalf("moderator prompt missing %q in %q", want, moderatorPrompt)
+		}
+	}
+	if outcome.Trace.ReviewRounds != 1 {
+		t.Fatalf("Trace.ReviewRounds = %d, want 1", outcome.Trace.ReviewRounds)
+	}
+}
+
+func TestOpenAIReviewerRunsTwoRoundSpecialistsWithRoundOneContextAndModeratesFinalRoundOnly(t *testing.T) {
+	fake := newRecordingCompletion()
+	reviewer := newFakeReviewer(2, fake.complete)
+
+	outcome, err := reviewer.Review(context.Background(), "ticket", "diff", false, ReviewOptions{})
+	if err != nil {
+		t.Fatalf("Review() error = %v", err)
+	}
+
+	for _, role := range []string{"pragmatist", "architect", "designer"} {
+		prompt := fake.specialistPrompt(t, role, 2)
+		assertInOrder(t, prompt, []string{
+			"=== PRIOR ROUND AGENT ANALYSIS ===",
+			"Pragmatist:\nround 1 pragmatist",
+			"Architect:\nround 1 architect",
+			"Designer:\nround 1 designer",
+			"Now provide YOUR analysis.",
+		})
+	}
+
+	moderatorPrompt := fake.moderatorPrompt(t)
+	for _, want := range []string{"=== FINAL SPECIALIST AGENT ANALYSIS ===", "Pragmatist:\nround 2 pragmatist", "Architect:\nround 2 architect", "Designer:\nround 2 designer"} {
+		if !strings.Contains(moderatorPrompt, want) {
+			t.Fatalf("moderator prompt missing %q in %q", want, moderatorPrompt)
+		}
+	}
+	for _, unwanted := range []string{"round 1 pragmatist", "round 1 architect", "round 1 designer"} {
+		if strings.Contains(moderatorPrompt, unwanted) {
+			t.Fatalf("moderator prompt contains non-final output %q in %q", unwanted, moderatorPrompt)
+		}
+	}
+
+	wantTraceAgents := []string{"Round 1 - Pragmatist", "Round 1 - Architect", "Round 1 - Designer", "Round 2 - Pragmatist", "Round 2 - Architect", "Round 2 - Designer", "Moderator"}
+	if got := traceAgentNames(outcome.Trace.AgentMessages); strings.Join(got, ",") != strings.Join(wantTraceAgents, ",") {
+		t.Fatalf("trace agents = %#v, want %#v", got, wantTraceAgents)
+	}
+
+	wantDebate := []AgentMessage{{Agent: "Pragmatist", Content: "round 2 pragmatist"}, {Agent: "Architect", Content: "round 2 architect"}, {Agent: "Designer", Content: "round 2 designer"}}
+	if len(outcome.Result.AgentDebate) != len(wantDebate) {
+		t.Fatalf("AgentDebate length = %d, want %d", len(outcome.Result.AgentDebate), len(wantDebate))
+	}
+	for i, want := range wantDebate {
+		if outcome.Result.AgentDebate[i] != want {
+			t.Fatalf("AgentDebate[%d] = %#v, want %#v", i, outcome.Result.AgentDebate[i], want)
+		}
+	}
+}
+
+func TestOpenAIReviewerStopsBeforeLaterRoundsAndModeratorWhenSpecialistFails(t *testing.T) {
+	fake := newRecordingCompletion()
+	fake.failRole = "architect"
+	reviewer := newFakeReviewer(2, fake.complete)
+
+	_, err := reviewer.Review(context.Background(), "ticket", "diff", false, ReviewOptions{})
+
+	if err == nil {
+		t.Fatal("Review() error = nil, want specialist failure")
+	}
+	if !strings.Contains(err.Error(), "round 1") || !strings.Contains(err.Error(), "Architect") {
+		t.Fatalf("Review() error = %q, want round and agent", err.Error())
+	}
+	if fake.countRoleRound("moderator", 1) != 0 {
+		t.Fatalf("moderator was called after specialist failure")
+	}
+	for _, role := range []string{"pragmatist", "architect", "designer"} {
+		if fake.countRoleRound(role, 2) != 0 {
+			t.Fatalf("round 2 %s was called after round 1 failure", role)
+		}
+	}
+}
+
 func TestBuildUserPromptIncludesAdditionalInstructionWhenProvided(t *testing.T) {
 	prompt := buildUserPrompt("ticket", "diff", nil, "Only review auth changes.")
 
@@ -435,7 +549,7 @@ func TestBuildUserPromptOmitsAdditionalInstructionSectionWhenEmpty(t *testing.T)
 func TestBuildUserPromptPlacesScopeOverridesAfterPreviousAgentAnalysis(t *testing.T) {
 	prompt := buildUserPrompt("ticket", "diff", []AgentMessage{{Agent: "Pragmatist", Content: "finding"}}, "Ignore dev command findings.")
 
-	previousIndex := strings.Index(prompt, "=== PREVIOUS AGENT ANALYSIS ===")
+	previousIndex := strings.Index(prompt, "=== PRIOR ROUND AGENT ANALYSIS ===")
 	overrideIndex := strings.Index(prompt, "=== USER REVIEW SCOPE OVERRIDES ===")
 	analysisIndex := strings.Index(prompt, "Now provide YOUR analysis.")
 	if previousIndex < 0 || overrideIndex < 0 || analysisIndex < 0 {
@@ -444,6 +558,154 @@ func TestBuildUserPromptPlacesScopeOverridesAfterPreviousAgentAnalysis(t *testin
 	if !(previousIndex < overrideIndex && overrideIndex < analysisIndex) {
 		t.Fatalf("section order previous=%d override=%d analysis=%d in %q", previousIndex, overrideIndex, analysisIndex, prompt)
 	}
+}
+
+func TestBuildModeratorPromptPlacesScopeOverridesAfterFinalSpecialistAnalysis(t *testing.T) {
+	prompt := buildModeratorUserPrompt("ticket", "diff", []AgentMessage{{Agent: "Pragmatist", Content: "finding"}}, "Ignore dev command findings.")
+
+	finalIndex := strings.Index(prompt, "=== FINAL SPECIALIST AGENT ANALYSIS ===")
+	overrideIndex := strings.Index(prompt, "=== USER REVIEW SCOPE OVERRIDES ===")
+	analysisIndex := strings.Index(prompt, "Now provide YOUR analysis.")
+	if finalIndex < 0 || overrideIndex < 0 || analysisIndex < 0 {
+		t.Fatalf("prompt missing expected sections: %q", prompt)
+	}
+	if !(finalIndex < overrideIndex && overrideIndex < analysisIndex) {
+		t.Fatalf("section order final=%d override=%d analysis=%d in %q", finalIndex, overrideIndex, analysisIndex, prompt)
+	}
+}
+
+func newFakeReviewer(reviewRounds int, complete chatCompletionFunc) *OpenAIReviewer {
+	reviewer := NewOpenAIReviewer("api-key", "gpt-default", "medium", reviewRounds, map[string]string{
+		"non_interactive": "non interactive",
+		"pragmatist":      "pragmatist system",
+		"architect":       "architect system",
+		"designer":        "designer system",
+		"moderator":       "moderator system",
+	}, true)
+	if complete != nil {
+		reviewer.complete = complete
+	}
+	return reviewer
+}
+
+type recordedCompletionCall struct {
+	role       string
+	round      int
+	userPrompt string
+}
+
+type recordingCompletion struct {
+	mu       sync.Mutex
+	calls    []recordedCompletionCall
+	failRole string
+}
+
+func newRecordingCompletion() *recordingCompletion {
+	return &recordingCompletion{}
+}
+
+func (f *recordingCompletion) complete(ctx context.Context, model, reasoningEffort, systemPrompt, userPrompt string, temperature float32) (string, error) {
+	role := roleFromSystemPrompt(systemPrompt)
+	round := 1
+	if role != "moderator" && strings.Contains(userPrompt, "PRIOR ROUND AGENT ANALYSIS") {
+		round = 2
+	}
+
+	f.mu.Lock()
+	f.calls = append(f.calls, recordedCompletionCall{role: role, round: round, userPrompt: userPrompt})
+	f.mu.Unlock()
+
+	if role == f.failRole {
+		return "", errors.New("boom")
+	}
+	if role == "moderator" {
+		return validModeratorOutput(), nil
+	}
+	return "round " + strconv.Itoa(round) + " " + role, nil
+}
+
+func (f *recordingCompletion) specialistPrompt(t *testing.T, role string, round int) string {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, call := range f.calls {
+		if call.role == role && call.round == round {
+			return call.userPrompt
+		}
+	}
+	t.Fatalf("missing %s round %d call in %#v", role, round, f.calls)
+	return ""
+}
+
+func (f *recordingCompletion) moderatorPrompt(t *testing.T) string {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, call := range f.calls {
+		if call.role == "moderator" {
+			return call.userPrompt
+		}
+	}
+	t.Fatalf("missing moderator call in %#v", f.calls)
+	return ""
+}
+
+func (f *recordingCompletion) countRoleRound(role string, round int) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	count := 0
+	for _, call := range f.calls {
+		if call.role == role && call.round == round {
+			count++
+		}
+	}
+	return count
+}
+
+func roleFromSystemPrompt(systemPrompt string) string {
+	for _, role := range []string{"pragmatist", "architect", "designer", "moderator"} {
+		if strings.Contains(systemPrompt, role+" system") {
+			return role
+		}
+	}
+	return "unknown"
+}
+
+func validModeratorOutput() string {
+	return `TICKET_COVERAGE: :white_check_mark: All criteria covered
+
+BLOCKERS: None
+
+WARNINGS: None
+
+SUGGESTIONS: None
+
+ASSUMPTIONS: None
+
+SUMMARY: Safe to merge.`
+}
+
+func assertInOrder(t *testing.T, content string, wants []string) {
+	t.Helper()
+	last := -1
+	for _, want := range wants {
+		idx := strings.Index(content, want)
+		if idx < 0 {
+			t.Fatalf("content missing %q in %q", want, content)
+		}
+		if idx <= last {
+			t.Fatalf("content has %q out of order in %q", want, content)
+		}
+		last = idx
+	}
+}
+
+func traceAgentNames(messages []AgentTraceMessage) []string {
+	names := make([]string, 0, len(messages))
+	for _, message := range messages {
+		names = append(names, message.Agent)
+	}
+	return names
 }
 
 func TestWrapAgentRunErrorPreservesRuntimeErrors(t *testing.T) {

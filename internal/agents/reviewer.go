@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -50,6 +51,7 @@ type ReviewOptions struct {
 type ReviewTrace struct {
 	Model           string
 	ReasoningEffort string
+	ReviewRounds    int
 	IncludePrompts  bool
 	AgentMessages   []AgentTraceMessage
 	ModeratorOutput string
@@ -69,10 +71,24 @@ type OpenAIReviewer struct {
 	reviewRounds    int
 	skills          map[string]string
 	includePrompts  bool
+	complete        chatCompletionFunc
+}
+
+type chatCompletionFunc func(ctx context.Context, model, reasoningEffort, systemPrompt, userPrompt string, temperature float32) (string, error)
+
+type specialistRole struct {
+	agent string
+	role  string
+}
+
+var specialistRoles = []specialistRole{
+	{agent: "Pragmatist", role: "pragmatist"},
+	{agent: "Architect", role: "architect"},
+	{agent: "Designer", role: "designer"},
 }
 
 func NewOpenAIReviewer(apiKey, model, reasoningEffort string, reviewRounds int, skills map[string]string, includePrompts bool) *OpenAIReviewer {
-	return &OpenAIReviewer{
+	reviewer := &OpenAIReviewer{
 		client:          openai.NewClient(option.WithAPIKey(apiKey)),
 		model:           model,
 		reasoningEffort: reasoningEffort,
@@ -80,37 +96,33 @@ func NewOpenAIReviewer(apiKey, model, reasoningEffort string, reviewRounds int, 
 		skills:          skills,
 		includePrompts:  includePrompts,
 	}
+	reviewer.complete = reviewer.openAICompletion
+	return reviewer
 }
 
 func (r *OpenAIReviewer) Review(ctx context.Context, ticketContext, diff string, diffTruncated bool, options ReviewOptions) (ReviewOutcome, error) {
 	effectiveOptions := r.resolveReviewOptions(options)
-	debate := make([]AgentMessage, 0, 3)
-	trace := ReviewTrace{Model: effectiveOptions.Model, ReasoningEffort: effectiveOptions.ReasoningEffort, IncludePrompts: r.includePrompts, AgentMessages: make([]AgentTraceMessage, 0, 4)}
-
-	pragmatist, pragmatistTrace, err := r.runAgent(ctx, "Pragmatist", "pragmatist", ticketContext, diff, nil, 0.3, effectiveOptions)
-	if err != nil {
-		return ReviewOutcome{}, err
+	if effectiveOptions.ReviewRounds != 1 && effectiveOptions.ReviewRounds != 2 {
+		return ReviewOutcome{}, fmt.Errorf("invalid review rounds %d: expected 1 or 2", effectiveOptions.ReviewRounds)
 	}
-	debate = append(debate, AgentMessage{Agent: "Pragmatist", Content: pragmatist})
-	trace.AgentMessages = append(trace.AgentMessages, pragmatistTrace)
 
-	architect, architectTrace, err := r.runAgent(ctx, "Architect", "architect", ticketContext, diff, debate, 0.3, effectiveOptions)
-	if err != nil {
-		return ReviewOutcome{}, err
+	trace := ReviewTrace{Model: effectiveOptions.Model, ReasoningEffort: effectiveOptions.ReasoningEffort, ReviewRounds: effectiveOptions.ReviewRounds, IncludePrompts: r.includePrompts, AgentMessages: make([]AgentTraceMessage, 0, effectiveOptions.ReviewRounds*3+1)}
+
+	var finalRound []AgentMessage
+	var priorRound []AgentMessage
+	for round := 1; round <= effectiveOptions.ReviewRounds; round++ {
+		messages, traces, err := r.runSpecialistRound(ctx, round, ticketContext, diff, priorRound, effectiveOptions)
+		if err != nil {
+			return ReviewOutcome{Trace: trace}, err
+		}
+		trace.AgentMessages = append(trace.AgentMessages, traces...)
+		finalRound = messages
+		priorRound = messages
 	}
-	debate = append(debate, AgentMessage{Agent: "Architect", Content: architect})
-	trace.AgentMessages = append(trace.AgentMessages, architectTrace)
 
-	designer, designerTrace, err := r.runAgent(ctx, "Designer", "designer", ticketContext, diff, debate, 0.3, effectiveOptions)
+	moderator, moderatorTrace, err := r.runAgent(ctx, "Moderator", "Moderator", "moderator", ticketContext, diff, finalRound, "=== FINAL SPECIALIST AGENT ANALYSIS ===", 0.1, effectiveOptions)
 	if err != nil {
-		return ReviewOutcome{}, err
-	}
-	debate = append(debate, AgentMessage{Agent: "Designer", Content: designer})
-	trace.AgentMessages = append(trace.AgentMessages, designerTrace)
-
-	moderator, moderatorTrace, err := r.runAgent(ctx, "Moderator", "moderator", ticketContext, diff, debate, 0.1, effectiveOptions)
-	if err != nil {
-		return ReviewOutcome{}, err
+		return ReviewOutcome{Trace: trace}, err
 	}
 	trace.AgentMessages = append(trace.AgentMessages, moderatorTrace)
 	trace.ModeratorOutput = moderator
@@ -119,7 +131,7 @@ func (r *OpenAIReviewer) Review(ctx context.Context, ticketContext, diff string,
 	if err != nil {
 		return ReviewOutcome{Trace: trace}, fmt.Errorf("parsing moderator output: %w", err)
 	}
-	result.AgentDebate = debate
+	result.AgentDebate = finalRound
 	result.DiffTruncated = diffTruncated
 
 	return ReviewOutcome{Result: result, Trace: trace}, nil
@@ -139,23 +151,67 @@ func (r *OpenAIReviewer) resolveReviewOptions(options ReviewOptions) ReviewOptio
 	return effective
 }
 
-func (r *OpenAIReviewer) runAgent(ctx context.Context, agent, role, ticketContext, diff string, previous []AgentMessage, temperature float32, options ReviewOptions) (string, AgentTraceMessage, error) {
+func (r *OpenAIReviewer) runSpecialistRound(ctx context.Context, round int, ticketContext, diff string, previous []AgentMessage, options ReviewOptions) ([]AgentMessage, []AgentTraceMessage, error) {
+	roundCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	messages := make([]AgentMessage, len(specialistRoles))
+	traces := make([]AgentTraceMessage, len(specialistRoles))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+
+	for i, role := range specialistRoles {
+		i, role := i, role
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			output, trace, err := r.runAgent(roundCtx, role.agent, fmt.Sprintf("Round %d - %s", round, role.agent), role.role, ticketContext, diff, previous, "=== PRIOR ROUND AGENT ANALYSIS ===", 0.3, options)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("round %d %s agent: %w", round, role.agent, err)
+				}
+				mu.Unlock()
+				cancel()
+				return
+			}
+			messages[i] = AgentMessage{Agent: role.agent, Content: output}
+			traces[i] = trace
+		}()
+	}
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, nil, firstErr
+	}
+	return messages, traces, nil
+}
+
+func (r *OpenAIReviewer) runAgent(ctx context.Context, agent, traceAgent, role, ticketContext, diff string, previous []AgentMessage, analysisHeader string, temperature float32, options ReviewOptions) (string, AgentTraceMessage, error) {
 	systemPrompt, err := ComposeSystemPrompt(r.skills, role)
 	if err != nil {
 		return "", AgentTraceMessage{}, err
 	}
-	userPrompt := buildUserPrompt(ticketContext, diff, previous, options.AdditionalInstruction)
+	userPrompt := buildPrompt(ticketContext, diff, previous, analysisHeader, options.AdditionalInstruction)
 
-	resp, err := r.client.Chat.Completions.New(ctx, buildChatCompletionParams(options.Model, options.ReasoningEffort, systemPrompt, userPrompt, float64(temperature)))
+	output, err := r.complete(ctx, options.Model, options.ReasoningEffort, systemPrompt, userPrompt, temperature)
 	if err != nil {
 		return "", AgentTraceMessage{}, wrapAgentRunError(agent, err)
 	}
-	if len(resp.Choices) == 0 {
-		return "", AgentTraceMessage{}, emptyAgentResponseError(agent)
-	}
 
-	output := resp.Choices[0].Message.Content
-	return output, buildAgentTraceMessage(agent, systemPrompt, userPrompt, output, r.includePrompts), nil
+	return output, buildAgentTraceMessage(traceAgent, systemPrompt, userPrompt, output, r.includePrompts), nil
+}
+
+func (r *OpenAIReviewer) openAICompletion(ctx context.Context, model, reasoningEffort, systemPrompt, userPrompt string, temperature float32) (string, error) {
+	resp, err := r.client.Chat.Completions.New(ctx, buildChatCompletionParams(model, reasoningEffort, systemPrompt, userPrompt, float64(temperature)))
+	if err != nil {
+		return "", err
+	}
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("empty response")
+	}
+	return resp.Choices[0].Message.Content, nil
 }
 
 func buildChatCompletionParams(model, reasoningEffort, systemPrompt, userPrompt string, temperature float64) openai.ChatCompletionNewParams {
@@ -190,6 +246,14 @@ func buildAgentTraceMessage(agent, systemPrompt, userPrompt, output string, incl
 }
 
 func buildUserPrompt(ticketContext, diff string, previous []AgentMessage, additionalInstruction string) string {
+	return buildPrompt(ticketContext, diff, previous, "=== PRIOR ROUND AGENT ANALYSIS ===", additionalInstruction)
+}
+
+func buildModeratorUserPrompt(ticketContext, diff string, final []AgentMessage, additionalInstruction string) string {
+	return buildPrompt(ticketContext, diff, final, "=== FINAL SPECIALIST AGENT ANALYSIS ===", additionalInstruction)
+}
+
+func buildPrompt(ticketContext, diff string, previous []AgentMessage, analysisHeader, additionalInstruction string) string {
 	var b strings.Builder
 	b.WriteString("=== JIRA TICKET ===\n")
 	b.WriteString(ticketContext)
@@ -197,7 +261,9 @@ func buildUserPrompt(ticketContext, diff string, previous []AgentMessage, additi
 	b.WriteString(diff)
 
 	if len(previous) > 0 {
-		b.WriteString("\n\n=== PREVIOUS AGENT ANALYSIS ===\n")
+		b.WriteString("\n\n")
+		b.WriteString(analysisHeader)
+		b.WriteString("\n")
 		for _, msg := range previous {
 			b.WriteString(msg.Agent)
 			b.WriteString(":\n")
