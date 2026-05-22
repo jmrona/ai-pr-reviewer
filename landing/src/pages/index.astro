@@ -111,7 +111,60 @@ const installCommand = `ai-reviewer() {
             The service stays stateless: Slack verifies the command, GitLab and Jira provide context, specialist agents review in parallel, and Slack receives the final answer.
           </p>
         </div>
-        <img src="/ai-pr-reviewer-overview.webp" alt="AI PR Reviewer flow diagram showing GitLab, Jira, Slack, specialist agents, Moderator, and final Slack output" />
+        <div class="flow-map" aria-label="AI PR Reviewer architecture flow">
+          <div class="flow-rail" aria-hidden="true">
+            <span></span>
+          </div>
+
+          <article class="flow-card flow-card--slack">
+            <p>Slack</p>
+            <h3>/review command</h3>
+            <code>MR URL + Jira ticket</code>
+          </article>
+
+          <div class="flow-arrow" aria-hidden="true"></div>
+
+          <article class="flow-card flow-card--fetch">
+            <p>Fetch context</p>
+            <h3>GitLab + Jira</h3>
+            <ul>
+              <li>merge request diff</li>
+              <li>ticket intent</li>
+            </ul>
+          </article>
+
+          <div class="flow-arrow" aria-hidden="true"></div>
+
+          <article class="flow-card flow-card--agents">
+            <p>Specialists</p>
+            <h3>2 review rounds</h3>
+            <div class="round-loop" aria-label="Two specialist review rounds">
+              <span>Round 1</span>
+              <span>Round 2</span>
+            </div>
+            <ul>
+              <li>Pragmatist</li>
+              <li>Designer</li>
+              <li>Architect</li>
+            </ul>
+          </article>
+
+          <div class="flow-arrow" aria-hidden="true"></div>
+
+          <article class="flow-card flow-card--moderator">
+            <p>Moderator</p>
+            <h3>1 final verdict</h3>
+            <code>dedupe + severity</code>
+          </article>
+
+          <div class="flow-arrow" aria-hidden="true"></div>
+
+          <article class="flow-card flow-card--output">
+            <p>Slack output</p>
+            <h3>Review report</h3>
+            <code>blockers / warnings / summary</code>
+          </article>
+        </div>
       </section>
 
       <section class="steps" aria-labelledby="steps-title">
