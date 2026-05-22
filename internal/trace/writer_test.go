@@ -17,15 +17,16 @@ func TestWriterCreatesDirectoryAndFileWithSanitisedFilenameAndSections(t *testin
 	writer := Writer{Enabled: true, Dir: dir, IncludePrompts: true}
 
 	path, err := writer.Write(context.Background(), TraceInput{
-		IssueKey:      "AI PR/123",
-		MRURL:         "https://gitlab.example.com/project/-/merge_requests/7",
-		TicketURL:     "https://jira.example.com/browse/AI-123",
-		TicketContext: "ticket context",
-		Diff:          "diff content",
-		DiffTruncated: true,
-		ReviewOutcome: reviewOutcome(true),
-		SlackMessage:  "slack message",
-		CreatedAt:     createdAt,
+		IssueKey:              "AI PR/123",
+		MRURL:                 "https://gitlab.example.com/project/-/merge_requests/7",
+		TicketURL:             "https://jira.example.com/browse/AI-123",
+		AdditionalInstruction: "Ignore generated files.",
+		TicketContext:         "ticket context",
+		Diff:                  "diff content",
+		DiffTruncated:         true,
+		ReviewOutcome:         reviewOutcome(true),
+		SlackMessage:          "slack message",
+		CreatedAt:             createdAt,
 	})
 	if err != nil {
 		t.Fatalf("Write() error = %v", err)
@@ -48,6 +49,7 @@ func TestWriterCreatesDirectoryAndFileWithSanitisedFilenameAndSections(t *testin
 		"Ticket: AI PR/123",
 		"MR URL: https://gitlab.example.com/project/-/merge_requests/7",
 		"Ticket URL: https://jira.example.com/browse/AI-123",
+		"Additional instruction: Ignore generated files.",
 		"Timestamp: 2026-05-21T21:30:45Z",
 		"Model: gpt-test",
 		"Reasoning effort: high",

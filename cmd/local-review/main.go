@@ -62,6 +62,7 @@ func run() error {
 	var child *localServer
 	if healthy(ctx, healthURL) {
 		_, _ = fmt.Fprintf(os.Stderr, "Reusing healthy local server on port %s.\n", port)
+		_, _ = fmt.Fprintln(os.Stderr, "Using trace settings from the already-running server process.")
 	} else {
 		child, err = startServer(ctx, repoRoot, env)
 		if err != nil {
@@ -104,12 +105,16 @@ func run() error {
 
 	tracePath, err := selectNewestMatchingTrace(traceDir, before, submittedAt, input.MRURL, input.TicketURL)
 	if err != nil {
-		return fmt.Errorf("extracting trace failed in %s after callback was received: %w", traceDir, err)
+		return fmt.Errorf("%s: %w", traceExtractionErrorMessage(traceDir, startedServer), err)
 	}
+	_, _ = fmt.Fprintln(os.Stderr, formatTracePathMessage(tracePath))
 
 	traceContent, err := os.ReadFile(tracePath)
 	if err != nil {
 		return fmt.Errorf("reading trace %s: %w", tracePath, err)
+	}
+	if err := ensureTraceRecordedAdditionalInstruction(traceContent, input.AdditionalInstruction); err != nil {
+		return fmt.Errorf("trace %s is incompatible with this local-review request: %w", tracePath, err)
 	}
 	result, err := extractParsedReviewResult(traceContent)
 	if err != nil {
@@ -121,6 +126,29 @@ func run() error {
 	}
 	_, _ = fmt.Fprintln(os.Stdout, renderParsedReviewResult(result))
 	return nil
+}
+
+func formatTracePathMessage(path string) string {
+	return "Using review trace: " + path
+}
+
+func traceExtractionErrorMessage(traceDir string, startedServer bool) string {
+	message := "extracting trace failed in " + traceDir + " after callback was received"
+	if !startedServer {
+		message += "; the reused server may have been started with different REVIEW_TRACE_ENABLED or REVIEW_TRACE_DIR settings, so stop it or restart it with tracing enabled"
+	}
+	return message
+}
+
+func ensureTraceRecordedAdditionalInstruction(traceContent []byte, additionalInstruction string) error {
+	if additionalInstruction == "" {
+		return nil
+	}
+	want := "Additional instruction: " + additionalInstruction
+	if strings.Contains(string(traceContent), want) {
+		return nil
+	}
+	return fmt.Errorf("additional instruction was not recorded; the reused server may not support additional instructions, so stop it or restart it with the latest code")
 }
 
 func renderParsedReviewResult(result string) string {
@@ -391,7 +419,7 @@ func promptReviewInputs(stderr io.Writer, stdin *bufio.Reader, env map[string]st
 }
 
 func promptRequired(stderr io.Writer, stdin *bufio.Reader, label string) (string, error) {
-	_, _ = fmt.Fprint(stderr, label)
+	_, _ = fmt.Fprint(stderr, formatPromptLabel(label))
 	value, err := stdin.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", fmt.Errorf("reading prompt: %w", err)
@@ -404,7 +432,7 @@ func promptRequired(stderr io.Writer, stdin *bufio.Reader, label string) (string
 }
 
 func promptOptional(stderr io.Writer, stdin *bufio.Reader, label string) (string, error) {
-	_, _ = fmt.Fprint(stderr, label)
+	_, _ = fmt.Fprint(stderr, formatPromptLabel(label))
 	value, err := stdin.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", fmt.Errorf("reading prompt: %w", err)
@@ -425,6 +453,10 @@ func promptOptionalWithDefault(stderr io.Writer, stdin *bufio.Reader, label, def
 		return strings.TrimSpace(defaultValue), nil
 	}
 	return value, nil
+}
+
+func formatPromptLabel(label string) string {
+	return "\x1b[1;36m" + label + "\x1b[0m"
 }
 
 func normaliseReasoningEffort(value string) string {

@@ -17,6 +17,7 @@ SEVERITY is one of: BLOCKER, WARNING, SUGGESTION.
 Severity calibration:
 - Apply user-provided review instructions as review scope guidance.
 - Ignore ordinary findings the user explicitly asked reviewers to ignore.
+- Do not include waived or ignored ordinary findings in Ticket Coverage, Blockers, Warnings, or Suggestions.
 - Do not ignore secrets, exploitable security vulnerabilities, data-loss risks, or production-breaking correctness issues visible in the diff.
 - Missing evidence for CI-enforced generation, check, test, or verification commands such as `just proto generate`, `just collab check`, `just platform test`, and similar `just <pillar> <command>` commands is not a BLOCKER by itself.
 - Missing ignored generated artefacts from the diff is not a BLOCKER by itself.

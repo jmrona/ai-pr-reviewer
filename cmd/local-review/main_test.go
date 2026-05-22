@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"io"
 	"net"
@@ -65,6 +66,41 @@ func TestRequireLocalConfigFailsClearlyWithoutSlackSigningSecret(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "SLACK_SIGNING_SECRET") {
 		t.Fatalf("error = %q, want missing SLACK_SIGNING_SECRET", err.Error())
+	}
+}
+
+func TestPromptRequiredWritesStyledPromptAndReturnsValue(t *testing.T) {
+	var stderr bytes.Buffer
+	stdin := bufio.NewReader(strings.NewReader("answer\n"))
+
+	value, err := promptRequired(&stderr, stdin, "GitLab MR URL: ")
+	if err != nil {
+		t.Fatalf("promptRequired() error = %v", err)
+	}
+
+	if value != "answer" {
+		t.Fatalf("value = %q, want answer", value)
+	}
+	if !strings.Contains(stderr.String(), "\x1b[") || !strings.Contains(stderr.String(), "GitLab MR URL") {
+		t.Fatalf("stderr prompt = %q, want styled label", stderr.String())
+	}
+}
+
+func TestPromptOptionalWithDefaultWritesStyledPromptAndReturnsDefault(t *testing.T) {
+	var stderr bytes.Buffer
+	stdin := bufio.NewReader(strings.NewReader("\n"))
+
+	value, err := promptOptionalWithDefault(&stderr, stdin, "Reasoning effort override", " high ")
+	if err != nil {
+		t.Fatalf("promptOptionalWithDefault() error = %v", err)
+	}
+
+	if value != "high" {
+		t.Fatalf("value = %q, want high", value)
+	}
+	prompt := stderr.String()
+	if !strings.Contains(prompt, "\x1b[") || !strings.Contains(prompt, "Reasoning effort override") || !strings.Contains(prompt, "[high]") {
+		t.Fatalf("stderr prompt = %q, want styled prompt with default", prompt)
 	}
 }
 
@@ -210,6 +246,44 @@ func TestExtractParsedReviewResultReturnsOnlyParsedSection(t *testing.T) {
 
 	if result != "Result line 1\nResult line 2" {
 		t.Fatalf("result = %q", result)
+	}
+}
+
+func TestFormatTracePathMessageShowsSelectedTrace(t *testing.T) {
+	message := formatTracePathMessage(".review-traces/PROJ-123.md")
+
+	if message != "Using review trace: .review-traces/PROJ-123.md" {
+		t.Fatalf("message = %q", message)
+	}
+}
+
+func TestTraceExtractionErrorMessageExplainsReusedServerTraceSettings(t *testing.T) {
+	message := traceExtractionErrorMessage(".review-traces", false)
+
+	for _, want := range []string{"extracting trace failed in .review-traces", "reused server", "REVIEW_TRACE_ENABLED", "REVIEW_TRACE_DIR"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message = %q, want %q", message, want)
+		}
+	}
+}
+
+func TestEnsureTraceRecordedAdditionalInstructionFailsWhenMissing(t *testing.T) {
+	trace := []byte("## Metadata\n\nMR URL: mr\n")
+
+	err := ensureTraceRecordedAdditionalInstruction(trace, "Ignore generated files.")
+	if err == nil {
+		t.Fatal("ensureTraceRecordedAdditionalInstruction() error = nil, want missing instruction error")
+	}
+	if !strings.Contains(err.Error(), "additional instruction was not recorded") {
+		t.Fatalf("error = %q, want missing instruction diagnostic", err.Error())
+	}
+}
+
+func TestEnsureTraceRecordedAdditionalInstructionPassesWhenPresent(t *testing.T) {
+	trace := []byte("Additional instruction: Ignore generated files.\n")
+
+	if err := ensureTraceRecordedAdditionalInstruction(trace, "Ignore generated files."); err != nil {
+		t.Fatalf("ensureTraceRecordedAdditionalInstruction() error = %v", err)
 	}
 }
 

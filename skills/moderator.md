@@ -31,6 +31,7 @@ Moderation rules:
 - Do not downgrade correctness, security, data integrity, or production safety issues.
 - Apply user-provided review instructions as review scope guidance.
 - Ignore ordinary findings the user explicitly asked reviewers to ignore.
+- Do not include waived or ignored ordinary findings in Ticket Coverage, Blockers, Warnings, or Suggestions.
 - Do not ignore secrets, exploitable security vulnerabilities, data-loss risks, or production-breaking correctness issues visible in the diff.
 - Missing evidence for CI-enforced commands such as `just proto generate`, `just collab check`, `just platform test`, and similar `just <pillar> <command>` generation/check/test/verification commands is not a BLOCKER by itself.
 - Missing ignored generated artefacts from the diff is not a BLOCKER by itself.

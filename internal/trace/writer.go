@@ -28,15 +28,16 @@ type Writer struct {
 }
 
 type TraceInput struct {
-	IssueKey      string
-	MRURL         string
-	TicketURL     string
-	TicketContext string
-	Diff          string
-	DiffTruncated bool
-	ReviewOutcome agents.ReviewOutcome
-	SlackMessage  string
-	CreatedAt     time.Time
+	IssueKey              string
+	MRURL                 string
+	TicketURL             string
+	AdditionalInstruction string
+	TicketContext         string
+	Diff                  string
+	DiffTruncated         bool
+	ReviewOutcome         agents.ReviewOutcome
+	SlackMessage          string
+	CreatedAt             time.Time
 }
 
 func NewWriter(enabled bool, dir string, includePrompts bool, redactions []string) Writer {
@@ -78,6 +79,7 @@ func renderMarkdown(input TraceInput, createdAt time.Time, includePrompts bool) 
 	writeField(&b, "Ticket", input.IssueKey)
 	writeField(&b, "MR URL", input.MRURL)
 	writeField(&b, "Ticket URL", input.TicketURL)
+	writeField(&b, "Additional instruction", input.AdditionalInstruction)
 	writeField(&b, "Timestamp", createdAt.Format(time.RFC3339))
 	writeField(&b, "Model", outcome.Trace.Model)
 	writeField(&b, "Reasoning effort", outcome.Trace.ReasoningEffort)

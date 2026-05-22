@@ -132,15 +132,16 @@ func (o *Orchestrator) writeTrace(ctx context.Context, req Request, ticketContex
 	}
 
 	path, err := o.traceWriter.Write(ctx, trace.TraceInput{
-		IssueKey:      req.IssueKey,
-		MRURL:         req.MRURL,
-		TicketURL:     req.TicketURL,
-		TicketContext: ticketContext,
-		Diff:          diff,
-		DiffTruncated: truncated,
-		ReviewOutcome: outcome,
-		SlackMessage:  message,
-		CreatedAt:     time.Now(),
+		IssueKey:              req.IssueKey,
+		MRURL:                 req.MRURL,
+		TicketURL:             req.TicketURL,
+		AdditionalInstruction: req.AdditionalInstruction,
+		TicketContext:         ticketContext,
+		Diff:                  diff,
+		DiffTruncated:         truncated,
+		ReviewOutcome:         outcome,
+		SlackMessage:          message,
+		CreatedAt:             time.Now(),
 	})
 	if err != nil {
 		o.logger.ErrorContext(ctx, "writing review trace failed", slog.String("error", err.Error()))

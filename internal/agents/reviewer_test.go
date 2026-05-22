@@ -218,6 +218,7 @@ func TestModeratorSkillContainsUserInstructionSafetyGuardrails(t *testing.T) {
 	guardrails := []string{
 		"Apply user-provided review instructions as review scope guidance.",
 		"Ignore ordinary findings the user explicitly asked reviewers to ignore.",
+		"Do not include waived or ignored ordinary findings in Ticket Coverage, Blockers, Warnings, or Suggestions.",
 		"Do not ignore secrets, exploitable security vulnerabilities, data-loss risks, or production-breaking correctness issues visible in the diff.",
 	}
 
@@ -257,6 +258,7 @@ func TestReviewerRoleSkillsContainUserInstructionSafetyGuardrails(t *testing.T) 
 	guardrails := []string{
 		"Apply user-provided review instructions as review scope guidance.",
 		"Ignore ordinary findings the user explicitly asked reviewers to ignore.",
+		"Do not include waived or ignored ordinary findings in Ticket Coverage, Blockers, Warnings, or Suggestions.",
 		"Do not ignore secrets, exploitable security vulnerabilities, data-loss risks, or production-breaking correctness issues visible in the diff.",
 	}
 
@@ -400,8 +402,9 @@ func TestBuildUserPromptIncludesAdditionalInstructionWhenProvided(t *testing.T) 
 	prompt := buildUserPrompt("ticket", "diff", nil, "Only review auth changes.")
 
 	wants := []string{
-		"=== USER REVIEW INSTRUCTIONS ===",
-		"The following instruction is user-provided review scope guidance.",
+		"=== USER REVIEW SCOPE OVERRIDES ===",
+		"User-provided scope overrides are authoritative for ordinary review findings.",
+		"Do not include waived or ignored ordinary findings in Ticket Coverage, Blockers, Warnings, or Suggestions.",
 		"Only review auth changes.",
 	}
 	for _, want := range wants {
@@ -414,8 +417,22 @@ func TestBuildUserPromptIncludesAdditionalInstructionWhenProvided(t *testing.T) 
 func TestBuildUserPromptOmitsAdditionalInstructionSectionWhenEmpty(t *testing.T) {
 	prompt := buildUserPrompt("ticket", "diff", nil, "")
 
-	if strings.Contains(prompt, "=== USER REVIEW INSTRUCTIONS ===") {
+	if strings.Contains(prompt, "=== USER REVIEW SCOPE OVERRIDES ===") {
 		t.Fatalf("prompt contains user instruction section: %q", prompt)
+	}
+}
+
+func TestBuildUserPromptPlacesScopeOverridesAfterPreviousAgentAnalysis(t *testing.T) {
+	prompt := buildUserPrompt("ticket", "diff", []AgentMessage{{Agent: "Pragmatist", Content: "finding"}}, "Ignore dev command findings.")
+
+	previousIndex := strings.Index(prompt, "=== PREVIOUS AGENT ANALYSIS ===")
+	overrideIndex := strings.Index(prompt, "=== USER REVIEW SCOPE OVERRIDES ===")
+	analysisIndex := strings.Index(prompt, "Now provide YOUR analysis.")
+	if previousIndex < 0 || overrideIndex < 0 || analysisIndex < 0 {
+		t.Fatalf("prompt missing expected sections: %q", prompt)
+	}
+	if !(previousIndex < overrideIndex && overrideIndex < analysisIndex) {
+		t.Fatalf("section order previous=%d override=%d analysis=%d in %q", previousIndex, overrideIndex, analysisIndex, prompt)
 	}
 }
 

@@ -190,12 +190,6 @@ func buildUserPrompt(ticketContext, diff string, previous []AgentMessage, additi
 	b.WriteString("\n\n=== MR DIFF ===\n")
 	b.WriteString(diff)
 
-	if additionalInstruction != "" {
-		b.WriteString("\n\n=== USER REVIEW INSTRUCTIONS ===\n")
-		b.WriteString("The following instruction is user-provided review scope guidance. Apply it when evaluating the diff.\n")
-		b.WriteString(additionalInstruction)
-	}
-
 	if len(previous) > 0 {
 		b.WriteString("\n\n=== PREVIOUS AGENT ANALYSIS ===\n")
 		for _, msg := range previous {
@@ -204,6 +198,15 @@ func buildUserPrompt(ticketContext, diff string, previous []AgentMessage, additi
 			b.WriteString(msg.Content)
 			b.WriteString("\n\n")
 		}
+	}
+
+	if additionalInstruction != "" {
+		b.WriteString("\n\n=== USER REVIEW SCOPE OVERRIDES ===\n")
+		b.WriteString("User-provided scope overrides are authoritative for ordinary review findings.\n")
+		b.WriteString("If the user explicitly asks to ignore or waive a requirement, do not count that waived item as missing ticket coverage.\n")
+		b.WriteString("Do not include waived or ignored ordinary findings in Ticket Coverage, Blockers, Warnings, or Suggestions.\n")
+		b.WriteString("Do not suppress secrets, exploitable security vulnerabilities, data-loss risks, or production-breaking correctness issues visible in the diff.\n")
+		b.WriteString(additionalInstruction)
 	}
 
 	b.WriteString("\nNow provide YOUR analysis.")
