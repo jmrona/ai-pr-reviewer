@@ -160,9 +160,12 @@ func appendElapsedReviewTimeToTrace(path, line string) error {
 	if err != nil {
 		return fmt.Errorf("opening trace %s to append elapsed review timing: %w", path, err)
 	}
-	defer func() { _ = file.Close() }()
 	if _, err := file.WriteString(spacing + line + "\n"); err != nil {
+		_ = file.Close()
 		return fmt.Errorf("appending elapsed review timing to trace %s: %w", path, err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("closing trace %s after appending elapsed review timing: %w", path, err)
 	}
 	return nil
 }
