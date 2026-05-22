@@ -1,6 +1,36 @@
 ---
 import '../styles/global.css';
 
+const siteUrl = 'https://ai-pr-reviewer-five.vercel.app/';
+const pageTitle = 'AI PR Reviewer | Multi-Agent Code Review CLI for GitLab, Jira, and Slack';
+const pageDescription = 'Run multi-agent AI merge request reviews from Slack or your terminal. AI PR Reviewer combines GitLab diffs, Jira ticket context, review rounds, traces, and a final moderated verdict.';
+const pageKeywords = 'AI PR reviewer, code review AI, merge request review, pull request review, GitLab review, Jira ticket review, Slack slash command, terminal code review, Astro landing page';
+const previewImage = `${siteUrl}ai-pr-reviewer-overview.webp`;
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'AI PR Reviewer',
+  applicationCategory: 'DeveloperApplication',
+  operatingSystem: 'macOS, Linux, Windows',
+  url: siteUrl,
+  image: previewImage,
+  description: pageDescription,
+  offers: {
+    '@type': 'Offer',
+    price: '0',
+    priceCurrency: 'USD'
+  },
+  featureList: [
+    'Terminal command for local AI merge request reviews',
+    'Slack slash command workflow',
+    'GitLab merge request diff analysis',
+    'Jira ticket context extraction',
+    'Parallel specialist review rounds',
+    'Moderator-generated final verdict',
+    'Local review traces with agent timing'
+  ]
+};
+
 const features = [
   {
     label: 'Local progress',
@@ -64,8 +94,26 @@ const installCommand = `ai-reviewer() {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="AI PR Reviewer is a terminal-friendly, multi-agent merge request reviewer for GitLab, Jira, and Slack workflows." />
-    <title>AI PR Reviewer | Multi-agent terminal code review</title>
+    <title>{pageTitle}</title>
+    <meta name="description" content={pageDescription} />
+    <meta name="keywords" content={pageKeywords} />
+    <meta name="robots" content="index, follow" />
+    <meta name="author" content="AI PR Reviewer" />
+    <meta name="application-name" content="AI PR Reviewer" />
+    <meta name="theme-color" content="#030817" />
+    <link rel="canonical" href={siteUrl} />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={pageDescription} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={siteUrl} />
+    <meta property="og:image" content={previewImage} />
+    <meta property="og:image:alt" content="AI PR Reviewer architecture overview showing GitLab, Jira, specialist agents, Moderator, and Slack output" />
+    <meta property="og:site_name" content="AI PR Reviewer" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={pageTitle} />
+    <meta name="twitter:description" content={pageDescription} />
+    <meta name="twitter:image" content={previewImage} />
+    <script type="application/ld+json" set:html={JSON.stringify(structuredData)} />
   </head>
   <body>
     <main>

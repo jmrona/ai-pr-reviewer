@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://ai-pr-reviewer-five.vercel.app/sitemap.xml
