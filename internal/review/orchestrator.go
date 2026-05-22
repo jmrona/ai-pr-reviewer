@@ -21,6 +21,7 @@ type Request struct {
 	IssueKey              string
 	Model                 string
 	ReasoningEffort       string
+	ReviewRounds          int
 	AdditionalInstruction string
 }
 
@@ -106,6 +107,7 @@ func (o *Orchestrator) process(ctx context.Context, req Request) error {
 	outcome, err := o.reviewer.Review(ctx, ticketContext, diff, truncated, agents.ReviewOptions{
 		Model:                 req.Model,
 		ReasoningEffort:       req.ReasoningEffort,
+		ReviewRounds:          req.ReviewRounds,
 		AdditionalInstruction: req.AdditionalInstruction,
 	})
 	if err != nil {

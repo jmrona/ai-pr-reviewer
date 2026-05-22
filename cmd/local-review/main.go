@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -419,6 +420,7 @@ type reviewInput struct {
 	TicketURL             string
 	Model                 string
 	ReasoningEffort       string
+	ReviewRounds          int
 	AdditionalInstruction string
 }
 
@@ -443,6 +445,10 @@ func promptReviewInputs(stderr io.Writer, stdin *bufio.Reader, env map[string]st
 	if err := validateReasoningEffort(reasoningEffort); err != nil {
 		return reviewInput{}, err
 	}
+	reviewRounds, err := promptReviewRounds(stderr, stdin, env["OPENAI_REVIEW_ROUNDS"])
+	if err != nil {
+		return reviewInput{}, err
+	}
 	additionalInstruction, err := promptOptional(stderr, stdin, "Additional review instruction/comment (optional): ")
 	if err != nil {
 		return reviewInput{}, err
@@ -452,6 +458,7 @@ func promptReviewInputs(stderr io.Writer, stdin *bufio.Reader, env map[string]st
 		TicketURL:             ticketURL,
 		Model:                 model,
 		ReasoningEffort:       reasoningEffort,
+		ReviewRounds:          reviewRounds,
 		AdditionalInstruction: additionalInstruction,
 	}, nil
 }
@@ -513,6 +520,25 @@ func validateReasoningEffort(value string) error {
 	}
 }
 
+func promptReviewRounds(stderr io.Writer, stdin *bufio.Reader, defaultValue string) (int, error) {
+	if strings.TrimSpace(defaultValue) == "" {
+		defaultValue = "2"
+	}
+	value, err := promptOptionalWithDefault(stderr, stdin, "Review rounds", defaultValue)
+	if err != nil {
+		return 0, err
+	}
+	return parseReviewRounds(value)
+}
+
+func parseReviewRounds(value string) (int, error) {
+	rounds, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || (rounds != 1 && rounds != 2) {
+		return 0, fmt.Errorf("invalid review rounds %q; must be 1 or 2", strings.TrimSpace(value))
+	}
+	return rounds, nil
+}
+
 type callbackServer struct {
 	server      *http.Server
 	responseURL string
@@ -561,6 +587,9 @@ func submitReview(ctx context.Context, port, signingSecret string, input reviewI
 	}
 	if input.ReasoningEffort != "" {
 		values.Set("reasoning_effort", input.ReasoningEffort)
+	}
+	if input.ReviewRounds != 0 {
+		values.Set("review_rounds", strconv.Itoa(input.ReviewRounds))
 	}
 	if input.AdditionalInstruction != "" {
 		values.Set("additional_instruction", input.AdditionalInstruction)

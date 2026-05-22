@@ -375,26 +375,36 @@ func TestBuildChatCompletionParamsOmitsTemperature(t *testing.T) {
 }
 
 func TestOpenAIReviewerUsesConfiguredDefaultsWhenReviewOptionsAreEmpty(t *testing.T) {
-	reviewer := NewOpenAIReviewer("api-key", "gpt-default", "medium", nil, false)
+	reviewer := NewOpenAIReviewer("api-key", "gpt-default", "medium", 2, nil, false)
 
 	options := reviewer.resolveReviewOptions(ReviewOptions{})
 
-	if options.Model != "gpt-default" || options.ReasoningEffort != "medium" {
+	if options.Model != "gpt-default" || options.ReasoningEffort != "medium" || options.ReviewRounds != 2 {
 		t.Fatalf("options = %#v, want configured defaults", options)
 	}
 }
 
 func TestOpenAIReviewerUsesRequestReviewOptionsWithoutMutatingDefaults(t *testing.T) {
-	reviewer := NewOpenAIReviewer("api-key", "gpt-default", "medium", nil, false)
+	reviewer := NewOpenAIReviewer("api-key", "gpt-default", "medium", 2, nil, false)
 
-	options := reviewer.resolveReviewOptions(ReviewOptions{Model: "gpt-request", ReasoningEffort: "high"})
+	options := reviewer.resolveReviewOptions(ReviewOptions{Model: "gpt-request", ReasoningEffort: "high", ReviewRounds: 1})
 	defaults := reviewer.resolveReviewOptions(ReviewOptions{})
 
-	if options.Model != "gpt-request" || options.ReasoningEffort != "high" {
+	if options.Model != "gpt-request" || options.ReasoningEffort != "high" || options.ReviewRounds != 1 {
 		t.Fatalf("options = %#v, want request overrides", options)
 	}
-	if defaults.Model != "gpt-default" || defaults.ReasoningEffort != "medium" {
+	if defaults.Model != "gpt-default" || defaults.ReasoningEffort != "medium" || defaults.ReviewRounds != 2 {
 		t.Fatalf("defaults after override = %#v, want stored defaults unchanged", defaults)
+	}
+}
+
+func TestOpenAIReviewerPreservesNonZeroRequestReviewRounds(t *testing.T) {
+	reviewer := NewOpenAIReviewer("api-key", "gpt-default", "medium", 2, nil, false)
+
+	options := reviewer.resolveReviewOptions(ReviewOptions{ReviewRounds: 1})
+
+	if options.ReviewRounds != 1 {
+		t.Fatalf("ReviewRounds = %d, want request override 1", options.ReviewRounds)
 	}
 }
 

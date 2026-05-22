@@ -111,10 +111,12 @@ func TestPromptReviewInputsUsesLocalDefaultsForBlankModelAndEffort(t *testing.T)
 		"",
 		"",
 		"",
+		"",
 	}, "\n")))
 	env := map[string]string{
 		"OPENAI_MODEL":            "gpt-5.5",
 		"OPENAI_REASONING_EFFORT": "high",
+		"OPENAI_REVIEW_ROUNDS":    "1",
 	}
 
 	input, err := promptReviewInputs(io.Discard, stdin, env)
@@ -134,6 +136,9 @@ func TestPromptReviewInputsUsesLocalDefaultsForBlankModelAndEffort(t *testing.T)
 	if input.ReasoningEffort != "high" {
 		t.Fatalf("ReasoningEffort = %q, want local default", input.ReasoningEffort)
 	}
+	if input.ReviewRounds != 1 {
+		t.Fatalf("ReviewRounds = %d, want local default", input.ReviewRounds)
+	}
 	if input.AdditionalInstruction != "" {
 		t.Fatalf("AdditionalInstruction = %q, want empty", input.AdditionalInstruction)
 	}
@@ -142,6 +147,7 @@ func TestPromptReviewInputsUsesLocalDefaultsForBlankModelAndEffort(t *testing.T)
 func TestPromptReviewInputsNormalisesDefaultReasoningEffortBeforeSubmission(t *testing.T) {
 	stdin := bufio.NewReader(strings.NewReader(strings.Join([]string{
 		"https://gitlab.example.com/group/project/-/merge_requests/7",
+		"",
 		"",
 		"",
 		"",
@@ -158,6 +164,73 @@ func TestPromptReviewInputsNormalisesDefaultReasoningEffortBeforeSubmission(t *t
 
 	if input.ReasoningEffort != "xhigh" {
 		t.Fatalf("ReasoningEffort = %q, want normalised xhigh", input.ReasoningEffort)
+	}
+}
+
+func TestPromptReviewInputsDefaultsReviewRoundsToTwoWhenEnvIsBlank(t *testing.T) {
+	stdin := bufio.NewReader(strings.NewReader(strings.Join([]string{
+		"https://gitlab.example.com/group/project/-/merge_requests/7",
+		"",
+		"",
+		"",
+		"",
+	}, "\n")))
+
+	input, err := promptReviewInputs(io.Discard, stdin, map[string]string{})
+	if err != nil {
+		t.Fatalf("prompting review inputs: %v", err)
+	}
+
+	if input.ReviewRounds != 2 {
+		t.Fatalf("ReviewRounds = %d, want default 2", input.ReviewRounds)
+	}
+}
+
+func TestPromptReviewInputsPromptsForReviewRoundsAfterReasoningEffort(t *testing.T) {
+	var stderr bytes.Buffer
+	stdin := bufio.NewReader(strings.NewReader(strings.Join([]string{
+		"https://gitlab.example.com/group/project/-/merge_requests/7",
+		"",
+		"",
+		"",
+		"",
+	}, "\n")))
+
+	_, err := promptReviewInputs(&stderr, stdin, map[string]string{"OPENAI_REVIEW_ROUNDS": "2"})
+	if err != nil {
+		t.Fatalf("prompting review inputs: %v", err)
+	}
+
+	prompt := stderr.String()
+	reasoningIndex := strings.Index(prompt, "Reasoning effort override")
+	roundsIndex := strings.Index(prompt, "Review rounds")
+	instructionIndex := strings.Index(prompt, "Additional review instruction")
+	if reasoningIndex < 0 || roundsIndex < 0 || instructionIndex < 0 {
+		t.Fatalf("prompt = %q, want reasoning, review rounds, and additional instruction prompts", prompt)
+	}
+	if !(reasoningIndex < roundsIndex && roundsIndex < instructionIndex) {
+		t.Fatalf("prompt order reasoning=%d rounds=%d instruction=%d in %q", reasoningIndex, roundsIndex, instructionIndex, prompt)
+	}
+	if !strings.Contains(prompt, "[2]") {
+		t.Fatalf("prompt = %q, want review rounds default", prompt)
+	}
+}
+
+func TestPromptReviewInputsRejectsInvalidReviewRoundsBeforeSubmission(t *testing.T) {
+	stdin := bufio.NewReader(strings.NewReader(strings.Join([]string{
+		"https://gitlab.example.com/group/project/-/merge_requests/7",
+		"",
+		"",
+		"",
+		"3",
+	}, "\n")))
+
+	_, err := promptReviewInputs(io.Discard, stdin, map[string]string{})
+	if err == nil {
+		t.Fatal("promptReviewInputs() error = nil, want invalid review rounds error")
+	}
+	if !strings.Contains(err.Error(), "review rounds") || !strings.Contains(err.Error(), "1 or 2") {
+		t.Fatalf("error = %q, want review rounds validation", err.Error())
 	}
 }
 
@@ -185,6 +258,7 @@ func TestSubmitReviewIncludesOptionalFormFieldsOnlyWhenNonEmpty(t *testing.T) {
 		TicketURL:             "https://jira.example.com/browse/PROJ-7",
 		Model:                 "gpt-5.5",
 		ReasoningEffort:       "xhigh",
+		ReviewRounds:          1,
 		AdditionalInstruction: "Focus on security regressions.",
 	})
 
@@ -202,6 +276,9 @@ func TestSubmitReviewIncludesOptionalFormFieldsOnlyWhenNonEmpty(t *testing.T) {
 	}
 	if values.Get("reasoning_effort") != "xhigh" {
 		t.Fatalf("reasoning_effort = %q", values.Get("reasoning_effort"))
+	}
+	if values.Get("review_rounds") != "1" {
+		t.Fatalf("review_rounds = %q", values.Get("review_rounds"))
 	}
 	if values.Get("additional_instruction") != "Focus on security regressions." {
 		t.Fatalf("additional_instruction = %q", values.Get("additional_instruction"))
@@ -221,7 +298,7 @@ func TestSubmitReviewOmitsOptionalFieldsAndUsesMROnlyTextWhenBlank(t *testing.T)
 	if values.Get("text") != "https://gitlab.example.com/group/project/-/merge_requests/7" {
 		t.Fatalf("text = %q, want MR URL only", values.Get("text"))
 	}
-	for _, field := range []string{"model", "reasoning_effort", "additional_instruction"} {
+	for _, field := range []string{"model", "reasoning_effort", "review_rounds", "additional_instruction"} {
 		if _, ok := values[field]; ok {
 			t.Fatalf("%s was submitted with values %v, want omitted", field, values[field])
 		}

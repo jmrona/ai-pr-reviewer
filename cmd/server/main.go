@@ -42,7 +42,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	reviewer := agents.NewOpenAIReviewer(cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.OpenAIReasoningEffort, skills, cfg.ReviewTraceIncludePrompts)
+	reviewer := agents.NewOpenAIReviewer(cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.OpenAIReasoningEffort, cfg.OpenAIReviewRounds, skills, cfg.ReviewTraceIncludePrompts)
 	poster := slack.NewPoster(httpClient)
 	orchestratorOptions := []review.OrchestratorOption{}
 	if cfg.ReviewTraceEnabled {

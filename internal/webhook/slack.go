@@ -216,6 +216,11 @@ func populateOptions(req *review.Request, values url.Values) error {
 	req.Model = strings.TrimSpace(values.Get("model"))
 	req.ReasoningEffort = strings.ToLower(strings.TrimSpace(values.Get("reasoning_effort")))
 	req.AdditionalInstruction = strings.TrimSpace(values.Get("additional_instruction"))
+	reviewRounds, err := parseReviewRounds(values.Get("review_rounds"))
+	if err != nil {
+		return err
+	}
+	req.ReviewRounds = reviewRounds
 
 	if req.ReasoningEffort == "" {
 		return nil
@@ -226,6 +231,18 @@ func populateOptions(req *review.Request, values url.Values) error {
 		}
 	}
 	return fmt.Errorf("reasoning_effort must be one of: low, medium, high, xhigh")
+}
+
+func parseReviewRounds(value string) (int, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, nil
+	}
+	rounds, err := strconv.Atoi(trimmed)
+	if err != nil || (rounds != 1 && rounds != 2) {
+		return 0, fmt.Errorf("review_rounds must be 1 or 2")
+	}
+	return rounds, nil
 }
 
 func writeSlackMessage(w http.ResponseWriter, text string) {

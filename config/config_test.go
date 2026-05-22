@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -30,6 +31,9 @@ func TestLoadUsesDefaultsAndAllowsMissingSlackBotToken(t *testing.T) {
 	if cfg.OpenAIReasoningEffort != "" {
 		t.Fatalf("OpenAIReasoningEffort = %q, want empty", cfg.OpenAIReasoningEffort)
 	}
+	if cfg.OpenAIReviewRounds != 2 {
+		t.Fatalf("OpenAIReviewRounds = %d, want 2", cfg.OpenAIReviewRounds)
+	}
 	if cfg.ReviewTraceEnabled {
 		t.Fatal("ReviewTraceEnabled = true, want false")
 	}
@@ -41,6 +45,74 @@ func TestLoadUsesDefaultsAndAllowsMissingSlackBotToken(t *testing.T) {
 	}
 	if cfg.SlackBotToken != "" {
 		t.Fatalf("SlackBotToken = %q, want empty", cfg.SlackBotToken)
+	}
+}
+
+func TestLoadAcceptsConfiguredOpenAIReviewRounds(t *testing.T) {
+	for _, rounds := range []int{1, 2} {
+		t.Run(strconv.Itoa(rounds), func(t *testing.T) {
+			t.Setenv("SLACK_SIGNING_SECRET", "secret")
+			t.Setenv("GITLAB_TOKEN", "gitlab")
+			t.Setenv("JIRA_BASE_URL", "https://example.atlassian.net")
+			t.Setenv("JIRA_EMAIL", "user@example.com")
+			t.Setenv("JIRA_TOKEN", "jira")
+			t.Setenv("OPENAI_API_KEY", "openai")
+			t.Setenv("OPENAI_REVIEW_ROUNDS", " "+strconv.Itoa(rounds)+" ")
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+
+			if cfg.OpenAIReviewRounds != rounds {
+				t.Fatalf("OpenAIReviewRounds = %d, want %d", cfg.OpenAIReviewRounds, rounds)
+			}
+		})
+	}
+}
+
+func TestLoadDefaultsOpenAIReviewRoundsWhenUnsetOrEmpty(t *testing.T) {
+	for _, value := range []string{"", "   "} {
+		t.Run(strconv.Quote(value), func(t *testing.T) {
+			t.Setenv("SLACK_SIGNING_SECRET", "secret")
+			t.Setenv("GITLAB_TOKEN", "gitlab")
+			t.Setenv("JIRA_BASE_URL", "https://example.atlassian.net")
+			t.Setenv("JIRA_EMAIL", "user@example.com")
+			t.Setenv("JIRA_TOKEN", "jira")
+			t.Setenv("OPENAI_API_KEY", "openai")
+			t.Setenv("OPENAI_REVIEW_ROUNDS", value)
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+
+			if cfg.OpenAIReviewRounds != 2 {
+				t.Fatalf("OpenAIReviewRounds = %d, want 2", cfg.OpenAIReviewRounds)
+			}
+		})
+	}
+}
+
+func TestLoadFailsForInvalidOpenAIReviewRounds(t *testing.T) {
+	for _, value := range []string{"0", "3", "two"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("SLACK_SIGNING_SECRET", "secret")
+			t.Setenv("GITLAB_TOKEN", "gitlab")
+			t.Setenv("JIRA_BASE_URL", "https://example.atlassian.net")
+			t.Setenv("JIRA_EMAIL", "user@example.com")
+			t.Setenv("JIRA_TOKEN", "jira")
+			t.Setenv("OPENAI_API_KEY", "openai")
+			t.Setenv("OPENAI_REVIEW_ROUNDS", value)
+
+			_, err := Load()
+			if err == nil {
+				t.Fatal("Load() error = nil, want review rounds validation error")
+			}
+			if !strings.Contains(err.Error(), "OPENAI_REVIEW_ROUNDS") || !strings.Contains(err.Error(), "1 or 2") {
+				t.Fatalf("Load() error = %v, want clear review rounds validation error", err)
+			}
+		})
 	}
 }
 

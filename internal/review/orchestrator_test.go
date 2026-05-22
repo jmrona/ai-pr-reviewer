@@ -92,10 +92,11 @@ func TestOrchestratorPassesReviewOptionsToReviewer(t *testing.T) {
 		IssueKey:              "PROJ-141",
 		Model:                 "gpt-5.5",
 		ReasoningEffort:       "high",
+		ReviewRounds:          1,
 		AdditionalInstruction: "Only review auth changes.",
 	})
 
-	want := agents.ReviewOptions{Model: "gpt-5.5", ReasoningEffort: "high", AdditionalInstruction: "Only review auth changes."}
+	want := agents.ReviewOptions{Model: "gpt-5.5", ReasoningEffort: "high", ReviewRounds: 1, AdditionalInstruction: "Only review auth changes."}
 	if reviewer.options != want {
 		t.Fatalf("review options = %#v, want %#v", reviewer.options, want)
 	}

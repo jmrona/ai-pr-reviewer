@@ -126,6 +126,7 @@ func TestHandlerPopulatesOptionalReviewFields(t *testing.T) {
 		"response_url":           {"https://hooks.slack.com/response"},
 		"model":                  {"  gpt-5.1  "},
 		"reasoning_effort":       {"  high  "},
+		"review_rounds":          {" 1 "},
 		"additional_instruction": {"  focus on regressions  "},
 	}.Encode()
 	req := signedRequest(body, handler.signingSecret, handler.now())
@@ -140,9 +141,68 @@ func TestHandlerPopulatesOptionalReviewFields(t *testing.T) {
 	case got := <-processor.done:
 		assertRequestStringField(t, got, "Model", "gpt-5.1")
 		assertRequestStringField(t, got, "ReasoningEffort", "high")
+		if got.ReviewRounds != 1 {
+			t.Fatalf("review.Request.ReviewRounds = %d, want 1", got.ReviewRounds)
+		}
 		assertRequestStringField(t, got, "AdditionalInstruction", "focus on regressions")
 	case <-time.After(time.Second):
 		t.Fatal("processor was not called")
+	}
+}
+
+func TestHandlerLeavesReviewRoundsUnsetWhenOverrideIsBlank(t *testing.T) {
+	processor := &fakeProcessor{done: make(chan review.Request, 1)}
+	handler := newTestHandler(processor)
+	body := url.Values{
+		"text":          {"https://gitlab.example.com/platform/application/-/merge_requests/108"},
+		"response_url":  {"https://hooks.slack.com/response"},
+		"review_rounds": {"   "},
+	}.Encode()
+	req := signedRequest(body, handler.signingSecret, handler.now())
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "Reviewing MR") {
+		t.Fatalf("body = %q, want reviewing acknowledgement", rec.Body.String())
+	}
+	select {
+	case got := <-processor.done:
+		if got.ReviewRounds != 0 {
+			t.Fatalf("review.Request.ReviewRounds = %d, want no override", got.ReviewRounds)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("processor was not called")
+	}
+}
+
+func TestHandlerRejectsInvalidReviewRounds(t *testing.T) {
+	for _, value := range []string{"0", "3", "two"} {
+		t.Run(value, func(t *testing.T) {
+			processor := &fakeProcessor{done: make(chan review.Request, 1)}
+			handler := newTestHandler(processor)
+			body := url.Values{
+				"text":          {"https://gitlab.example.com/platform/application/-/merge_requests/108"},
+				"response_url":  {"https://hooks.slack.com/response"},
+				"review_rounds": {value},
+			}.Encode()
+			req := signedRequest(body, handler.signingSecret, handler.now())
+
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+			if !strings.Contains(rec.Body.String(), "review_rounds must be 1 or 2") {
+				t.Fatalf("body = %q, want review rounds error", rec.Body.String())
+			}
+			select {
+			case got := <-processor.done:
+				t.Fatalf("processor was called for invalid request: %#v", got)
+			case <-time.After(50 * time.Millisecond):
+			}
+		})
 	}
 }
 

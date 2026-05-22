@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -12,6 +13,7 @@ const (
 	DefaultPort           = "8080"
 	DefaultGitLabBaseURL  = "https://gitlab.com"
 	DefaultOpenAIModel    = "gpt-4o"
+	DefaultReviewRounds   = 2
 	DefaultReviewTraceDir = ".review-traces"
 
 	ServerReadTimeout   = 5 * time.Second
@@ -32,12 +34,18 @@ type Config struct {
 	OpenAIAPIKey              string
 	OpenAIModel               string
 	OpenAIReasoningEffort     string
+	OpenAIReviewRounds        int
 	ReviewTraceEnabled        bool
 	ReviewTraceDir            string
 	ReviewTraceIncludePrompts bool
 }
 
 func Load() (Config, error) {
+	reviewRounds, err := parseOpenAIReviewRounds(os.Getenv("OPENAI_REVIEW_ROUNDS"))
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		Port:                      valueOrDefault("PORT", DefaultPort),
 		SlackBotToken:             os.Getenv("SLACK_BOT_TOKEN"),
@@ -50,6 +58,7 @@ func Load() (Config, error) {
 		OpenAIAPIKey:              os.Getenv("OPENAI_API_KEY"),
 		OpenAIModel:               valueOrDefault("OPENAI_MODEL", DefaultOpenAIModel),
 		OpenAIReasoningEffort:     normaliseOpenAIReasoningEffort(os.Getenv("OPENAI_REASONING_EFFORT")),
+		OpenAIReviewRounds:        reviewRounds,
 		ReviewTraceEnabled:        parseBool("REVIEW_TRACE_ENABLED"),
 		ReviewTraceDir:            valueOrDefault("REVIEW_TRACE_DIR", DefaultReviewTraceDir),
 		ReviewTraceIncludePrompts: parseBool("REVIEW_TRACE_INCLUDE_PROMPTS"),
@@ -115,6 +124,22 @@ func isValidOpenAIReasoningEffort(value string) bool {
 	default:
 		return false
 	}
+}
+
+func parseOpenAIReviewRounds(value string) (int, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return DefaultReviewRounds, nil
+	}
+	rounds, err := strconv.Atoi(trimmed)
+	if err != nil || !isValidReviewRounds(rounds) {
+		return 0, errors.New("OPENAI_REVIEW_ROUNDS must be 1 or 2")
+	}
+	return rounds, nil
+}
+
+func isValidReviewRounds(rounds int) bool {
+	return rounds == 1 || rounds == 2
 }
 
 func IsMissingConfigError(err error) bool {

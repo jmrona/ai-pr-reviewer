@@ -56,6 +56,7 @@ All configuration is read from environment variables.
 | `OPENAI_API_KEY` | Yes | | OpenAI API key. |
 | `OPENAI_MODEL` | No | `gpt-4o` | OpenAI model used for every agent round. |
 | `OPENAI_REASONING_EFFORT` | No | | Optional OpenAI reasoning effort. When set, must be `low`, `medium`, `high`, or `xhigh`. |
+| `OPENAI_REVIEW_ROUNDS` | No | `2` | Number of configured review rounds. Must be `1` or `2`. |
 | `REVIEW_TRACE_ENABLED` | No | `false` | Enables local review trace diagnostics. |
 | `REVIEW_TRACE_DIR` | No | `.review-traces` | Directory where review traces are written when enabled. |
 | `REVIEW_TRACE_INCLUDE_PROMPTS` | No | `false` | Includes agent prompt content in trace output when tracing is enabled. |
@@ -111,7 +112,7 @@ REVIEW_TRACE_DIR=.review-traces
 
 If no healthy server is running, the helper starts `go run ./cmd/server`, forces `REVIEW_TRACE_ENABLED=true`, defaults `REVIEW_TRACE_DIR` to `.review-traces`, writes server logs to `.local-review-server.log`, and stops only that child server when the helper exits.
 
-The helper prompts on stderr for the GitLab MR URL, optional Jira ticket URL, model, reasoning effort, and optional additional review instruction. Model and reasoning prompts show their local environment defaults, such as `OPENAI_MODEL` and `OPENAI_REASONING_EFFORT`, because these values are not secret. Valid reasoning effort values are `low`, `medium`, `high`, and `xhigh`.
+The helper prompts on stderr for the GitLab MR URL, optional Jira ticket URL, model, reasoning effort, review rounds, and optional additional review instruction. Model, reasoning, and review-round prompts show their local environment defaults, such as `OPENAI_MODEL`, `OPENAI_REASONING_EFFORT`, and `OPENAI_REVIEW_ROUNDS`, because these values are not secret. Valid reasoning effort values are `low`, `medium`, `high`, and `xhigh`; valid review-round values are `1` and `2`.
 
 The optional additional instruction guides review scope, such as asking the reviewer to focus on a specific risk or implementation area. It cannot suppress safety-critical findings visible in the diff, including secrets, exploitable security vulnerabilities, data-loss risks, or production-breaking correctness issues.
 

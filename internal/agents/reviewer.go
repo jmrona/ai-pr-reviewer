@@ -43,6 +43,7 @@ type ReviewOutcome struct {
 type ReviewOptions struct {
 	Model                 string
 	ReasoningEffort       string
+	ReviewRounds          int
 	AdditionalInstruction string
 }
 
@@ -65,15 +66,17 @@ type OpenAIReviewer struct {
 	client          openai.Client
 	model           string
 	reasoningEffort string
+	reviewRounds    int
 	skills          map[string]string
 	includePrompts  bool
 }
 
-func NewOpenAIReviewer(apiKey, model, reasoningEffort string, skills map[string]string, includePrompts bool) *OpenAIReviewer {
+func NewOpenAIReviewer(apiKey, model, reasoningEffort string, reviewRounds int, skills map[string]string, includePrompts bool) *OpenAIReviewer {
 	return &OpenAIReviewer{
 		client:          openai.NewClient(option.WithAPIKey(apiKey)),
 		model:           model,
 		reasoningEffort: reasoningEffort,
+		reviewRounds:    reviewRounds,
 		skills:          skills,
 		includePrompts:  includePrompts,
 	}
@@ -129,6 +132,9 @@ func (r *OpenAIReviewer) resolveReviewOptions(options ReviewOptions) ReviewOptio
 	}
 	if effective.ReasoningEffort == "" {
 		effective.ReasoningEffort = r.reasoningEffort
+	}
+	if effective.ReviewRounds == 0 {
+		effective.ReviewRounds = r.reviewRounds
 	}
 	return effective
 }
