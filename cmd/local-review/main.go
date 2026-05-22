@@ -123,8 +123,64 @@ func run() error {
 	if startedServer {
 		_, _ = fmt.Fprintln(os.Stderr, "Stopping local server started by this helper.")
 	}
-	_, _ = fmt.Fprintln(os.Stdout, result)
+	_, _ = fmt.Fprintln(os.Stdout, renderParsedReviewResult(result))
 	return nil
+}
+
+func renderParsedReviewResult(result string) string {
+	lines := strings.Split(result, "\n")
+	fenceLength := 0
+	for i, line := range lines {
+		currentFenceLength := markdownFenceLength(line)
+		if fenceLength == 0 && currentFenceLength >= 3 {
+			fenceLength = currentFenceLength
+			continue
+		}
+		if fenceLength > 0 {
+			if currentFenceLength >= fenceLength {
+				fenceLength = 0
+			}
+			continue
+		}
+		level, heading, ok := parseMarkdownHeading(line)
+		if ok {
+			lines[i] = headingStyle(level) + heading + "\x1b[0m"
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func markdownFenceLength(line string) int {
+	trimmed := strings.TrimSpace(line)
+	length := 0
+	for length < len(trimmed) && trimmed[length] == '`' {
+		length++
+	}
+	return length
+}
+
+func parseMarkdownHeading(line string) (int, string, bool) {
+	level := 0
+	for level < len(line) && line[level] == '#' {
+		level++
+	}
+	if level == 0 || level > 6 || level == len(line) || line[level] != ' ' {
+		return 0, "", false
+	}
+	return level, strings.TrimLeft(line[level:], " "), true
+}
+
+func headingStyle(level int) string {
+	switch level {
+	case 1:
+		return "\x1b[1;35m"
+	case 2:
+		return "\x1b[1;34m"
+	case 3:
+		return "\x1b[1;36m"
+	default:
+		return "\x1b[1;33m"
+	}
 }
 
 func loadDotEnv(repoRoot string) (map[string]string, error) {

@@ -83,6 +83,82 @@ func TestExtractParsedReviewResultReturnsOnlyParsedSection(t *testing.T) {
 	}
 }
 
+func TestRenderParsedReviewResultRemovesHeadingMarkersAndAppliesStyles(t *testing.T) {
+	result := strings.Join([]string{
+		"# Summary",
+		"## Findings",
+		"### Major",
+		"#### Ticket Coverage",
+		"Body line",
+	}, "\n")
+
+	rendered := renderParsedReviewResult(result)
+
+	want := strings.Join([]string{
+		"\x1b[1;35mSummary\x1b[0m",
+		"\x1b[1;34mFindings\x1b[0m",
+		"\x1b[1;36mMajor\x1b[0m",
+		"\x1b[1;33mTicket Coverage\x1b[0m",
+		"Body line",
+	}, "\n")
+	if rendered != want {
+		t.Fatalf("rendered = %q, want %q", rendered, want)
+	}
+}
+
+func TestRenderParsedReviewResultKeepsNonHeadingLinesUnchanged(t *testing.T) {
+	result := strings.Join([]string{
+		"Intro line",
+		"",
+		"- #### not a heading because it is a list item",
+		"No blocker found.",
+	}, "\n")
+
+	rendered := renderParsedReviewResult(result)
+
+	if rendered != result {
+		t.Fatalf("rendered = %q, want unchanged result", rendered)
+	}
+}
+
+func TestRenderParsedReviewResultKeepsFencedCodeBlocksUnchanged(t *testing.T) {
+	result := strings.Join([]string{
+		"#### Blockers",
+		"```",
+		"# comment inside code",
+		"#### also code",
+		"```",
+	}, "\n")
+
+	rendered := renderParsedReviewResult(result)
+
+	want := strings.Join([]string{
+		"\x1b[1;33mBlockers\x1b[0m",
+		"```",
+		"# comment inside code",
+		"#### also code",
+		"```",
+	}, "\n")
+	if rendered != want {
+		t.Fatalf("rendered = %q, want %q", rendered, want)
+	}
+}
+
+func TestRenderParsedReviewResultKeepsLongFencedCodeBlocksUnchanged(t *testing.T) {
+	result := strings.Join([]string{
+		"````",
+		"```",
+		"# still code",
+		"````",
+	}, "\n")
+
+	rendered := renderParsedReviewResult(result)
+
+	if rendered != result {
+		t.Fatalf("rendered = %q, want unchanged result", rendered)
+	}
+}
+
 func TestSelectNewestMatchingTraceUsesSubmissionSnapshotAndExactURLs(t *testing.T) {
 	dir := t.TempDir()
 	mrURL := "https://gitlab.example.com/group/project/-/merge_requests/7"
