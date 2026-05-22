@@ -29,6 +29,10 @@ Moderation rules:
 - Calibrate severity: BLOCKER blocks merge, WARNING should be fixed but may not block, SUGGESTION is optional improvement.
 - Do not inflate style or preference issues above SUGGESTION.
 - Do not downgrade correctness, security, data integrity, or production safety issues.
+- Missing evidence for CI-enforced commands such as `just proto generate`, `just collab check`, `just platform test`, and similar `just <pillar> <command>` generation/check/test/verification commands is not a BLOCKER by itself.
+- Missing ignored generated artefacts from the diff is not a BLOCKER by itself.
+- Report these as SUGGESTION or notes unless the provided diff itself demonstrates a real defect.
+- Preserve BLOCKER severity when the diff shows stale checked-in generated files, incompatible proto/source contracts, broken imports/references, missing committed source implementation, hand-edited generated code, failing checked-in tests, or acceptance criteria impossible to satisfy from the diff.
 - If evidence is incomplete, state the assumption or limitation and continue from provided evidence.
 - Keep the final answer concise, actionable, severity-labelled, and Slack friendly.
 - Do not depend on more information.

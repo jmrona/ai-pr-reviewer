@@ -182,6 +182,105 @@ func TestModeratorSkillContainsStableLabelGuardrails(t *testing.T) {
 	}
 }
 
+func TestModeratorSkillContainsCIEvidenceSeverityGuardrails(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(projectSkillsDir, "moderator.md"))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+
+	content := string(data)
+	guardrails := []string{
+		"Missing evidence for CI-enforced commands",
+		"just proto generate",
+		"just <pillar> <command>",
+		"is not a BLOCKER by itself",
+		"Missing ignored generated artefacts from the diff is not a BLOCKER by itself",
+		"Report these as SUGGESTION or notes unless the provided diff itself demonstrates a real defect",
+		"stale checked-in generated files",
+		"incompatible proto/source contracts",
+		"hand-edited generated code",
+	}
+
+	for _, guardrail := range guardrails {
+		if !strings.Contains(content, guardrail) {
+			t.Fatalf("moderator.md does not contain guardrail %q", guardrail)
+		}
+	}
+}
+
+func TestPragmatistSkillContainsCIEvidenceSeverityGuardrails(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(projectSkillsDir, "pragmatist.md"))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+
+	content := string(data)
+	guardrails := []string{
+		"Missing evidence for CI-enforced commands",
+		"just collab check",
+		"just platform test",
+		"is not a BLOCKER by itself",
+		"Missing ignored generated artefacts from the diff is not a BLOCKER by itself",
+		"Report these as SUGGESTION or notes unless the provided diff itself demonstrates a real defect",
+		"missing committed source implementation",
+		"acceptance criteria impossible to satisfy from the diff",
+	}
+
+	for _, guardrail := range guardrails {
+		if !strings.Contains(content, guardrail) {
+			t.Fatalf("pragmatist.md does not contain guardrail %q", guardrail)
+		}
+	}
+}
+
+func TestArchitectSkillContainsCIEvidenceSeverityGuardrails(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(projectSkillsDir, "architect.md"))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+
+	content := string(data)
+	guardrails := []string{
+		"Missing evidence for CI-enforced generation, check, test, or verification commands",
+		"just <pillar> <command>",
+		"is not a BLOCKER by itself",
+		"Missing ignored generated artefacts from the diff is not a BLOCKER by itself",
+		"Report these as SUGGESTION or notes unless the provided diff itself demonstrates a real defect",
+		"incompatible proto/source contracts",
+		"broken imports/references",
+	}
+
+	for _, guardrail := range guardrails {
+		if !strings.Contains(content, guardrail) {
+			t.Fatalf("architect.md does not contain guardrail %q", guardrail)
+		}
+	}
+}
+
+func TestDesignerSkillContainsCIEvidenceSeverityGuardrails(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(projectSkillsDir, "designer.md"))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+
+	content := string(data)
+	guardrails := []string{
+		"Missing evidence for CI-enforced generation, check, test, or verification commands",
+		"just <pillar> <command>",
+		"is not a BLOCKER by itself",
+		"Missing ignored generated artefacts from the diff is not a BLOCKER by itself",
+		"Report these as SUGGESTION or notes unless the provided diff itself demonstrates a real defect",
+		"failing checked-in tests",
+		"broken imports/references",
+	}
+
+	for _, guardrail := range guardrails {
+		if !strings.Contains(content, guardrail) {
+			t.Fatalf("designer.md does not contain guardrail %q", guardrail)
+		}
+	}
+}
+
 func TestBuildAgentTraceMessageOmitsPromptsWhenPromptCaptureIsDisabled(t *testing.T) {
 	message := buildAgentTraceMessage("Pragmatist", "system", "user", "output", false)
 
