@@ -84,7 +84,8 @@ func run() error {
 		return err
 	}
 
-	callback, err := startCallbackServer(ctx, os.Stderr)
+	progress := newProgressRenderer(os.Stderr)
+	callback, err := startCallbackServer(ctx, progress)
 	if err != nil {
 		return err
 	}
@@ -101,7 +102,7 @@ func run() error {
 		return err
 	}
 
-	if err := waitForCallback(ctx, callback.done, waitTimeout, os.Stderr); err != nil {
+	if err := waitForCallback(ctx, callback.done, waitTimeout, progress); err != nil {
 		return err
 	}
 
@@ -563,7 +564,57 @@ type callbackPayload struct {
 	Message string `json:"message"`
 }
 
-func startCallbackServer(ctx context.Context, stderr io.Writer) (callbackServer, error) {
+type progressRenderer struct {
+	mu        sync.Mutex
+	out       io.Writer
+	now       func() time.Time
+	active    string
+	startedAt time.Time
+	seen      bool
+}
+
+func newProgressRenderer(out io.Writer) *progressRenderer {
+	return &progressRenderer{out: out, now: time.Now}
+}
+
+func (r *progressRenderer) StartPhase(message string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := r.now()
+	r.completeActiveLocked(now)
+	r.active = message
+	r.startedAt = now
+	r.seen = true
+	_, _ = fmt.Fprintf(r.out, "\r[review] %s        ", message)
+}
+
+func (r *progressRenderer) RenderWaiting(spinner string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.seen {
+		return
+	}
+	_, _ = fmt.Fprintf(r.out, "\rWaiting for review callback %s", spinner)
+}
+
+func (r *progressRenderer) CompleteReview() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.completeActiveLocked(r.now())
+	_, _ = fmt.Fprint(r.out, "\r[review] Review complete.        \n")
+}
+
+func (r *progressRenderer) completeActiveLocked(now time.Time) {
+	if r.active == "" {
+		return
+	}
+	elapsed := now.Sub(r.startedAt).Round(time.Second)
+	_, _ = fmt.Fprintf(r.out, "\r[review] %s [%s]\n", r.active, elapsed)
+	r.active = ""
+}
+
+func startCallbackServer(ctx context.Context, progress *progressRenderer) (callbackServer, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return callbackServer{}, fmt.Errorf("starting callback listener: %w", err)
@@ -581,7 +632,7 @@ func startCallbackServer(ctx context.Context, stderr io.Writer) (callbackServer,
 		var payload callbackPayload
 		if err := json.Unmarshal(body, &payload); err == nil && payload.Type == "progress" {
 			if strings.TrimSpace(payload.Message) != "" {
-				_, _ = fmt.Fprintf(stderr, "\r[review] %s\n", payload.Message)
+				progress.StartPhase(payload.Message)
 			}
 			w.WriteHeader(http.StatusOK)
 			return
@@ -658,7 +709,7 @@ func signSlackRequest(secret, timestamp string, rawBody []byte) string {
 	return "v0=" + hex.EncodeToString(mac.Sum(nil))
 }
 
-func waitForCallback(ctx context.Context, done <-chan struct{}, timeout time.Duration, stderr io.Writer) error {
+func waitForCallback(ctx context.Context, done <-chan struct{}, timeout time.Duration, progress *progressRenderer) error {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -670,12 +721,12 @@ func waitForCallback(ctx context.Context, done <-chan struct{}, timeout time.Dur
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-done:
-			_, _ = fmt.Fprint(stderr, "\r[review] Review complete.        \n")
+			progress.CompleteReview()
 			return nil
 		case <-timer.C:
 			return fmt.Errorf("timed out after 11 minutes waiting for local callback")
 		case <-ticker.C:
-			_, _ = fmt.Fprintf(stderr, "\rWaiting for review callback %s", spinner[i%len(spinner)])
+			progress.RenderWaiting(spinner[i%len(spinner)])
 			i++
 		}
 	}

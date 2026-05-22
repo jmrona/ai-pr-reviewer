@@ -356,7 +356,8 @@ func TestCallbackServerPrintsProgressToStderrWithoutCompleting(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var stderr bytes.Buffer
-	callback, err := startCallbackServer(ctx, &stderr)
+	progress := newProgressRenderer(&stderr)
+	callback, err := startCallbackServer(ctx, progress)
 	if err != nil {
 		t.Fatalf("startCallbackServer() error = %v", err)
 	}
@@ -364,9 +365,39 @@ func TestCallbackServerPrintsProgressToStderrWithoutCompleting(t *testing.T) {
 
 	postCallback(t, callback.responseURL, map[string]string{"type": "progress", "message": "Fetching merge request context..."})
 
-	if got := stderr.String(); got != "\r[review] Fetching merge request context...\n" {
+	if got := stderr.String(); got != "\r[review] Fetching merge request context...        " {
 		t.Fatalf("stderr = %q, want progress line", got)
 	}
+	select {
+	case <-callback.done:
+		t.Fatal("progress callback closed done; want final callback only")
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestCallbackServerCompletesPreviousProgressWhenNextProgressArrives(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var stderr bytes.Buffer
+	now := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	progress := newProgressRenderer(&stderr)
+	progress.now = func() time.Time { return now }
+	callback, err := startCallbackServer(ctx, progress)
+	if err != nil {
+		t.Fatalf("startCallbackServer() error = %v", err)
+	}
+	defer func() { _ = callback.close(context.Background()) }()
+
+	postCallback(t, callback.responseURL, map[string]string{"type": "progress", "message": "Fetching merge request context..."})
+	now = now.Add(54 * time.Second)
+	postCallback(t, callback.responseURL, map[string]string{"type": "progress", "message": "Fetching Jira issue..."})
+
+	wants := []string{
+		"\r[review] Fetching merge request context...        ",
+		"\r[review] Fetching merge request context... [54s]\n",
+		"\r[review] Fetching Jira issue...        ",
+	}
+	assertContainsInOrder(t, stderr.String(), wants)
 	select {
 	case <-callback.done:
 		t.Fatal("progress callback closed done; want final callback only")
@@ -377,7 +408,7 @@ func TestCallbackServerPrintsProgressToStderrWithoutCompleting(t *testing.T) {
 func TestCallbackServerClosesDoneForFinalCallback(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	callback, err := startCallbackServer(ctx, io.Discard)
+	callback, err := startCallbackServer(ctx, newProgressRenderer(io.Discard))
 	if err != nil {
 		t.Fatalf("startCallbackServer() error = %v", err)
 	}
@@ -396,8 +427,9 @@ func TestWaitForCallbackPrintsReviewCompleteWithoutChangingFinalOutputFormatting
 	done := make(chan struct{})
 	close(done)
 	var stderr bytes.Buffer
+	progress := newProgressRenderer(&stderr)
 
-	if err := waitForCallback(context.Background(), done, time.Second, &stderr); err != nil {
+	if err := waitForCallback(context.Background(), done, time.Second, progress); err != nil {
 		t.Fatalf("waitForCallback() error = %v", err)
 	}
 	if got := stderr.String(); got != "\r[review] Review complete.        \n" {
@@ -407,6 +439,45 @@ func TestWaitForCallbackPrintsReviewCompleteWithoutChangingFinalOutputFormatting
 	output := formatFinalReviewOutput("Rendered review", "Review completed in 1s")
 	if output != "Rendered review\n\nReview completed in 1s\n" {
 		t.Fatalf("final output = %q, want unchanged stdout formatting", output)
+	}
+}
+
+func TestWaitForCallbackCompletesActiveProgressBeforeReviewComplete(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+	var stderr bytes.Buffer
+	now := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	progress := newProgressRenderer(&stderr)
+	progress.now = func() time.Time { return now }
+	progress.StartPhase("Running Moderator...")
+	now = now.Add(12 * time.Second)
+
+	if err := waitForCallback(context.Background(), done, time.Second, progress); err != nil {
+		t.Fatalf("waitForCallback() error = %v", err)
+	}
+
+	wants := []string{
+		"\r[review] Running Moderator...        ",
+		"\r[review] Running Moderator... [12s]\n",
+		"\r[review] Review complete.        \n",
+	}
+	assertContainsInOrder(t, stderr.String(), wants)
+}
+
+func TestProgressRendererSuppressesSpinnerAfterProgressStarts(t *testing.T) {
+	var stderr bytes.Buffer
+	progress := newProgressRenderer(&stderr)
+
+	progress.RenderWaiting("|")
+	progress.StartPhase("Fetching merge request context...")
+	progress.RenderWaiting("/")
+
+	output := stderr.String()
+	if !strings.Contains(output, "Waiting for review callback |") {
+		t.Fatalf("stderr = %q, want initial spinner", output)
+	}
+	if strings.Contains(output, "Waiting for review callback /") {
+		t.Fatalf("stderr = %q, want spinner suppressed after progress", output)
 	}
 }
 
@@ -570,6 +641,18 @@ func postCallback(t *testing.T, responseURL string, payload map[string]string) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("callback status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func assertContainsInOrder(t *testing.T, content string, wants []string) {
+	t.Helper()
+	start := 0
+	for _, want := range wants {
+		idx := strings.Index(content[start:], want)
+		if idx < 0 {
+			t.Fatalf("content missing %q after offset %d:\n%q", want, start, content)
+		}
+		start += idx + len(want)
 	}
 }
 
