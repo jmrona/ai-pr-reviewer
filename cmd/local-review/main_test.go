@@ -257,6 +257,43 @@ func TestFormatTracePathMessageShowsSelectedTrace(t *testing.T) {
 	}
 }
 
+func TestFormatElapsedReviewTimeUsesMinutesAndSeconds(t *testing.T) {
+	line := formatElapsedReviewTime(2*time.Minute + 13*time.Second + 900*time.Millisecond)
+
+	if line != "Review completed in 2m13s" {
+		t.Fatalf("line = %q, want elapsed review timing", line)
+	}
+}
+
+func TestFormatFinalReviewOutputEndsWithReviewBlankLineElapsedLineAndFinalNewline(t *testing.T) {
+	output := formatFinalReviewOutput("Rendered review\nwith details", "Review completed in 2m13s")
+
+	want := "Rendered review\nwith details\n\nReview completed in 2m13s\n"
+	if output != want {
+		t.Fatalf("output = %q, want exact final stdout composition", output)
+	}
+}
+
+func TestAppendElapsedReviewTimeToTraceWritesCleanMarkdownSpacing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "trace.md")
+	if err := os.WriteFile(path, []byte("## Final Slack Message\nReview body"), 0o600); err != nil {
+		t.Fatalf("writing trace: %v", err)
+	}
+
+	if err := appendElapsedReviewTimeToTrace(path, "Review completed in 2m13s"); err != nil {
+		t.Fatalf("appending elapsed review timing: %v", err)
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading trace: %v", err)
+	}
+	want := "## Final Slack Message\nReview body\n\nReview completed in 2m13s\n"
+	if string(content) != want {
+		t.Fatalf("trace content = %q, want clean elapsed timing append", string(content))
+	}
+}
+
 func TestTraceExtractionErrorMessageExplainsReusedServerTraceSettings(t *testing.T) {
 	message := traceExtractionErrorMessage(".review-traces", false)
 

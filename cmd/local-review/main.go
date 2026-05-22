@@ -120,16 +120,51 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("extracting parsed review result from %s failed; trace dir %s, callback was received: %w", tracePath, traceDir, err)
 	}
+	elapsedLine := formatElapsedReviewTime(time.Since(submittedAt))
+	if err := appendElapsedReviewTimeToTrace(tracePath, elapsedLine); err != nil {
+		return err
+	}
 
 	if startedServer {
 		_, _ = fmt.Fprintln(os.Stderr, "Stopping local server started by this helper.")
 	}
-	_, _ = fmt.Fprintln(os.Stdout, renderParsedReviewResult(result))
+	_, _ = fmt.Fprint(os.Stdout, formatFinalReviewOutput(renderParsedReviewResult(result), elapsedLine))
 	return nil
 }
 
 func formatTracePathMessage(path string) string {
 	return "Using review trace: " + path
+}
+
+func formatElapsedReviewTime(duration time.Duration) string {
+	return "Review completed in " + duration.Truncate(time.Second).String()
+}
+
+func formatFinalReviewOutput(renderedReview, elapsedLine string) string {
+	return renderedReview + "\n\n" + elapsedLine + "\n"
+}
+
+func appendElapsedReviewTimeToTrace(path, line string) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("reading trace %s before appending elapsed review timing: %w", path, err)
+	}
+	spacing := "\n\n"
+	if len(content) == 0 || bytes.HasSuffix(content, []byte("\n\n")) {
+		spacing = ""
+	} else if bytes.HasSuffix(content, []byte("\n")) {
+		spacing = "\n"
+	}
+
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		return fmt.Errorf("opening trace %s to append elapsed review timing: %w", path, err)
+	}
+	defer func() { _ = file.Close() }()
+	if _, err := file.WriteString(spacing + line + "\n"); err != nil {
+		return fmt.Errorf("appending elapsed review timing to trace %s: %w", path, err)
+	}
+	return nil
 }
 
 func traceExtractionErrorMessage(traceDir string, startedServer bool) string {
