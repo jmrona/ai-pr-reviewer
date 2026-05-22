@@ -30,6 +30,7 @@ type Writer struct {
 type TraceInput struct {
 	IssueKey      string
 	MRURL         string
+	TicketURL     string
 	TicketContext string
 	Diff          string
 	DiffTruncated bool
@@ -76,6 +77,7 @@ func renderMarkdown(input TraceInput, createdAt time.Time, includePrompts bool) 
 	b.WriteString("## Metadata\n\n")
 	writeField(&b, "Ticket", input.IssueKey)
 	writeField(&b, "MR URL", input.MRURL)
+	writeField(&b, "Ticket URL", input.TicketURL)
 	writeField(&b, "Timestamp", createdAt.Format(time.RFC3339))
 	writeField(&b, "Model", outcome.Trace.Model)
 	writeField(&b, "Reasoning effort", outcome.Trace.ReasoningEffort)

@@ -190,6 +190,7 @@ func (h *Handler) parseCommand(text, responseURL string) (review.Request, error)
 				return review.Request{}, fmt.Errorf("Expected one Jira ticket URL and one GitLab MR URL, but received two Jira ticket URLs.")
 			}
 			req.IssueKey = issueKey
+			req.TicketURL = arg
 			foundTicket = true
 		}
 	}

@@ -15,6 +15,7 @@ import (
 type Request struct {
 	ResponseURL string
 	MRURL       string
+	TicketURL   string
 	ProjectPath string
 	MRIID       int
 	IssueKey    string
@@ -120,6 +121,7 @@ func (o *Orchestrator) writeTrace(ctx context.Context, req Request, ticketContex
 	path, err := o.traceWriter.Write(ctx, trace.TraceInput{
 		IssueKey:      req.IssueKey,
 		MRURL:         req.MRURL,
+		TicketURL:     req.TicketURL,
 		TicketContext: ticketContext,
 		Diff:          diff,
 		DiffTruncated: truncated,

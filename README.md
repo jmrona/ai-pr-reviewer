@@ -88,6 +88,29 @@ Health check:
 curl http://localhost:8080/health
 ```
 
+### Local review helper
+
+Run a local review without Slack, ngrok, webhook.site, or any external callback URL:
+
+```sh
+go run ./cmd/local-review
+```
+
+The helper loads `.env` from the repository root, using simple `KEY=value` lines and ignoring blank lines and comments. Existing process environment variables take precedence over `.env` values. For this helper only, `PORT` defaults to `8888` when unset.
+
+`SLACK_SIGNING_SECRET` is required because the helper submits to the local `/slack/review` endpoint with a real Slack-compatible HMAC signature. The submitted `response_url` points to a loopback-only callback server on `127.0.0.1`; nothing is sent to Slack or any other external callback service.
+
+If `http://127.0.0.1:<PORT>/health` is already healthy, the helper reuses that server and will not stop it. When reusing an existing server, it must already have review traces enabled and must write traces that include the exact GitLab MR URL and Jira ticket URL. Set:
+
+```sh
+REVIEW_TRACE_ENABLED=true
+REVIEW_TRACE_DIR=.review-traces
+```
+
+If no healthy server is running, the helper starts `go run ./cmd/server`, forces `REVIEW_TRACE_ENABLED=true`, defaults `REVIEW_TRACE_DIR` to `.review-traces`, writes server logs to `.local-review-server.log`, and stops only that child server when the helper exits.
+
+The helper prompts on stderr for the GitLab MR URL and Jira ticket URL. Progress, prompts, errors, and diagnostics are written to stderr. On success, stdout contains only the extracted content between `## Parsed Review Result` and `## Final Slack Message` from the newest matching trace.
+
 ## Docker
 
 Build the image:

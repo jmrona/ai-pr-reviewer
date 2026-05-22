@@ -6,6 +6,7 @@ dist/
 coverage.out
 *.test
 *.log
+.local-review-server.log
 .review-traces/
 .DS_Store
 
