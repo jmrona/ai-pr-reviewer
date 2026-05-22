@@ -138,6 +138,7 @@ func writePrompts(b *strings.Builder, messages []agents.AgentTraceMessage, inclu
 		b.WriteString("### ")
 		b.WriteString(message.Agent)
 		b.WriteString("\n\n")
+		writeTraceDuration(b, message.Duration)
 		if message.SystemPrompt != "" {
 			writeSubsection(b, "System Prompt", message.SystemPrompt)
 		}
@@ -164,9 +165,29 @@ func writeAgentOutputs(b *strings.Builder, messages []agents.AgentTraceMessage) 
 		b.WriteString("### ")
 		b.WriteString(message.Agent)
 		b.WriteString("\n\n")
+		writeTraceDuration(b, message.Duration)
 		b.WriteString(message.Output)
 		b.WriteString("\n\n")
 	}
+}
+
+func writeTraceDuration(b *strings.Builder, duration time.Duration) {
+	formatted := formatTraceDuration(duration)
+	if formatted == "" {
+		return
+	}
+	writeField(b, "Duration", formatted)
+	b.WriteString("\n")
+}
+
+func formatTraceDuration(duration time.Duration) string {
+	if duration == 0 {
+		return ""
+	}
+	if duration < time.Millisecond && duration > -time.Millisecond {
+		return "<1ms"
+	}
+	return duration.Round(time.Millisecond).String()
 }
 
 func writeParsedReviewResult(b *strings.Builder, result agents.ReviewResult) {

@@ -153,6 +153,41 @@ func TestWriterWithPromptsEnabledWritesPromptSectionsAndContent(t *testing.T) {
 	}
 }
 
+func TestWriterRendersAgentDurationsNearPromptsAndOutputs(t *testing.T) {
+	writer := Writer{Enabled: true, Dir: t.TempDir(), IncludePrompts: true}
+
+	path, err := writer.Write(context.Background(), TraceInput{
+		IssueKey: "AI-123",
+		ReviewOutcome: agents.ReviewOutcome{
+			Trace: agents.ReviewTrace{
+				AgentMessages: []agents.AgentTraceMessage{
+					{Agent: "Round 2 - Pragmatist", SystemPrompt: "system prompt", UserPrompt: "user prompt", Output: "agent output", Duration: 4200 * time.Millisecond},
+					{Agent: "Moderator", SystemPrompt: "moderator system", UserPrompt: "moderator user", Output: "moderator output"},
+				},
+			},
+		},
+		CreatedAt: time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	contentBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	content := string(contentBytes)
+
+	assertInOrder(t, content, []string{"## Prompts", "### Round 2 - Pragmatist", "Duration: 4.2s", "#### System Prompt"})
+	assertInOrder(t, content, []string{"## Agent Outputs", "### Round 2 - Pragmatist", "Duration: 4.2s", "agent output"})
+	if strings.Contains(sectionForAgent(t, content, "## Prompts", "Moderator"), "Duration:") {
+		t.Fatalf("zero duration prompt section contains duration:\n%s", content)
+	}
+	if strings.Contains(sectionForAgent(t, content, "## Agent Outputs", "Moderator"), "Duration:") {
+		t.Fatalf("zero duration output section contains duration:\n%s", content)
+	}
+}
+
 func TestWriterRedactsConfiguredSecretsSlackHooksAuthorizationLinesAndBearerTokens(t *testing.T) {
 	writer := Writer{Enabled: true, Dir: t.TempDir(), IncludePrompts: true, Redactions: []string{"configured-secret"}}
 
@@ -222,4 +257,39 @@ func reviewOutcome(includePrompts bool) agents.ReviewOutcome {
 			ModeratorOutput: "moderator output",
 		},
 	}
+}
+
+func assertInOrder(t *testing.T, content string, wants []string) {
+	t.Helper()
+	last := -1
+	for _, want := range wants {
+		idx := strings.Index(content[last+1:], want)
+		if idx < 0 {
+			t.Fatalf("content missing %q after offset %d:\n%s", want, last, content)
+		}
+		last += idx + 1
+	}
+}
+
+func sectionForAgent(t *testing.T, content, parentSection, agent string) string {
+	t.Helper()
+	parentStart := strings.Index(content, parentSection)
+	if parentStart < 0 {
+		t.Fatalf("missing parent section %q:\n%s", parentSection, content)
+	}
+	agentHeading := "### " + agent
+	agentStart := strings.Index(content[parentStart:], agentHeading)
+	if agentStart < 0 {
+		t.Fatalf("missing agent section %q after %q:\n%s", agent, parentSection, content)
+	}
+	start := parentStart + agentStart
+	nextAgent := strings.Index(content[start+len(agentHeading):], "\n### ")
+	nextParent := strings.Index(content[start+len(agentHeading):], "\n## ")
+	end := len(content)
+	for _, next := range []int{nextAgent, nextParent} {
+		if next >= 0 && start+len(agentHeading)+next < end {
+			end = start + len(agentHeading) + next
+		}
+	}
+	return content[start:end]
 }

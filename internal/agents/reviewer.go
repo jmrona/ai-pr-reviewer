@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -62,6 +63,7 @@ type AgentTraceMessage struct {
 	SystemPrompt string
 	UserPrompt   string
 	Output       string
+	Duration     time.Duration
 }
 
 type OpenAIReviewer struct {
@@ -195,12 +197,17 @@ func (r *OpenAIReviewer) runAgent(ctx context.Context, agent, traceAgent, role, 
 	}
 	userPrompt := buildPrompt(ticketContext, diff, previous, analysisHeader, options.AdditionalInstruction)
 
+	start := time.Now()
 	output, err := r.complete(ctx, options.Model, options.ReasoningEffort, systemPrompt, userPrompt, temperature)
 	if err != nil {
 		return "", AgentTraceMessage{}, wrapAgentRunError(agent, err)
 	}
+	duration := time.Since(start)
+	if duration <= 0 {
+		duration = time.Nanosecond
+	}
 
-	return output, buildAgentTraceMessage(traceAgent, systemPrompt, userPrompt, output, r.includePrompts), nil
+	return output, buildAgentTraceMessage(traceAgent, systemPrompt, userPrompt, output, duration, r.includePrompts), nil
 }
 
 func (r *OpenAIReviewer) openAICompletion(ctx context.Context, model, reasoningEffort, systemPrompt, userPrompt string, temperature float32) (string, error) {
@@ -236,8 +243,8 @@ func emptyAgentResponseError(agent string) error {
 	return fmt.Errorf("running %s agent: empty response", agent)
 }
 
-func buildAgentTraceMessage(agent, systemPrompt, userPrompt, output string, includePrompts bool) AgentTraceMessage {
-	message := AgentTraceMessage{Agent: agent, Output: output}
+func buildAgentTraceMessage(agent, systemPrompt, userPrompt, output string, duration time.Duration, includePrompts bool) AgentTraceMessage {
+	message := AgentTraceMessage{Agent: agent, Output: output, Duration: duration}
 	if includePrompts {
 		message.SystemPrompt = systemPrompt
 		message.UserPrompt = userPrompt

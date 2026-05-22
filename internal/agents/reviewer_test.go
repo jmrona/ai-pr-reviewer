@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/openai/openai-go/v3/shared"
 )
@@ -329,10 +330,13 @@ func TestDesignerSkillContainsCIEvidenceSeverityGuardrails(t *testing.T) {
 }
 
 func TestBuildAgentTraceMessageOmitsPromptsWhenPromptCaptureIsDisabled(t *testing.T) {
-	message := buildAgentTraceMessage("Pragmatist", "system", "user", "output", false)
+	message := buildAgentTraceMessage("Pragmatist", "system", "user", "output", 3*time.Second, false)
 
 	if message.Agent != "Pragmatist" || message.Output != "output" {
 		t.Fatalf("trace message = %#v", message)
+	}
+	if message.Duration != 3*time.Second {
+		t.Fatalf("Duration = %s, want 3s", message.Duration)
 	}
 	if message.SystemPrompt != "" || message.UserPrompt != "" {
 		t.Fatalf("prompts = %q/%q, want empty strings", message.SystemPrompt, message.UserPrompt)
@@ -340,7 +344,7 @@ func TestBuildAgentTraceMessageOmitsPromptsWhenPromptCaptureIsDisabled(t *testin
 }
 
 func TestBuildAgentTraceMessageIncludesPromptsWhenPromptCaptureIsEnabled(t *testing.T) {
-	message := buildAgentTraceMessage("Architect", "system", "user", "output", true)
+	message := buildAgentTraceMessage("Architect", "system", "user", "output", 3*time.Second, true)
 
 	if message.SystemPrompt != "system" || message.UserPrompt != "user" {
 		t.Fatalf("prompts = %q/%q, want populated", message.SystemPrompt, message.UserPrompt)
@@ -495,6 +499,26 @@ func TestOpenAIReviewerRunsTwoRoundSpecialistsWithRoundOneContextAndModeratesFin
 	for i, want := range wantDebate {
 		if outcome.Result.AgentDebate[i] != want {
 			t.Fatalf("AgentDebate[%d] = %#v, want %#v", i, outcome.Result.AgentDebate[i], want)
+		}
+	}
+}
+
+func TestOpenAIReviewerTracesSuccessfulAgentDurations(t *testing.T) {
+	fake := newRecordingCompletion()
+	reviewer := newFakeReviewer(2, fake.complete)
+
+	outcome, err := reviewer.Review(context.Background(), "ticket", "diff", false, ReviewOptions{})
+	if err != nil {
+		t.Fatalf("Review() error = %v", err)
+	}
+
+	wantAgents := []string{"Round 1 - Pragmatist", "Round 1 - Architect", "Round 1 - Designer", "Round 2 - Pragmatist", "Round 2 - Architect", "Round 2 - Designer", "Moderator"}
+	if got := traceAgentNames(outcome.Trace.AgentMessages); strings.Join(got, ",") != strings.Join(wantAgents, ",") {
+		t.Fatalf("trace agents = %#v, want %#v", got, wantAgents)
+	}
+	for _, message := range outcome.Trace.AgentMessages {
+		if message.Duration <= 0*time.Nanosecond {
+			t.Fatalf("trace duration for %s = %s, want positive", message.Agent, message.Duration)
 		}
 	}
 }
