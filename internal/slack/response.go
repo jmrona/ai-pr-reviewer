@@ -50,9 +50,13 @@ func (p *Poster) Post(ctx context.Context, responseURL, text string) error {
 
 func FormatReviewResult(result agents.ReviewResult, issueKey, mrURL string) string {
 	var b strings.Builder
-	b.WriteString("*:robot_face: AI PR Review* | `")
-	b.WriteString(issueKey)
-	b.WriteString("` | <")
+	b.WriteString("*:robot_face: AI PR Review*")
+	if issueKey != "" {
+		b.WriteString(" | `")
+		b.WriteString(issueKey)
+		b.WriteString("`")
+	}
+	b.WriteString(" | <")
 	b.WriteString(mrURL)
 	b.WriteString("|View MR>\n\n")
 

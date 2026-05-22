@@ -40,6 +40,12 @@ type ReviewOutcome struct {
 	Trace  ReviewTrace
 }
 
+type ReviewOptions struct {
+	Model                 string
+	ReasoningEffort       string
+	AdditionalInstruction string
+}
+
 type ReviewTrace struct {
 	Model           string
 	ReasoningEffort string
@@ -73,32 +79,33 @@ func NewOpenAIReviewer(apiKey, model, reasoningEffort string, skills map[string]
 	}
 }
 
-func (r *OpenAIReviewer) Review(ctx context.Context, ticketContext, diff string, diffTruncated bool) (ReviewOutcome, error) {
+func (r *OpenAIReviewer) Review(ctx context.Context, ticketContext, diff string, diffTruncated bool, options ReviewOptions) (ReviewOutcome, error) {
+	effectiveOptions := r.resolveReviewOptions(options)
 	debate := make([]AgentMessage, 0, 3)
-	trace := ReviewTrace{Model: r.model, ReasoningEffort: r.reasoningEffort, IncludePrompts: r.includePrompts, AgentMessages: make([]AgentTraceMessage, 0, 4)}
+	trace := ReviewTrace{Model: effectiveOptions.Model, ReasoningEffort: effectiveOptions.ReasoningEffort, IncludePrompts: r.includePrompts, AgentMessages: make([]AgentTraceMessage, 0, 4)}
 
-	pragmatist, pragmatistTrace, err := r.runAgent(ctx, "Pragmatist", "pragmatist", ticketContext, diff, nil, 0.3)
+	pragmatist, pragmatistTrace, err := r.runAgent(ctx, "Pragmatist", "pragmatist", ticketContext, diff, nil, 0.3, effectiveOptions)
 	if err != nil {
 		return ReviewOutcome{}, err
 	}
 	debate = append(debate, AgentMessage{Agent: "Pragmatist", Content: pragmatist})
 	trace.AgentMessages = append(trace.AgentMessages, pragmatistTrace)
 
-	architect, architectTrace, err := r.runAgent(ctx, "Architect", "architect", ticketContext, diff, debate, 0.3)
+	architect, architectTrace, err := r.runAgent(ctx, "Architect", "architect", ticketContext, diff, debate, 0.3, effectiveOptions)
 	if err != nil {
 		return ReviewOutcome{}, err
 	}
 	debate = append(debate, AgentMessage{Agent: "Architect", Content: architect})
 	trace.AgentMessages = append(trace.AgentMessages, architectTrace)
 
-	designer, designerTrace, err := r.runAgent(ctx, "Designer", "designer", ticketContext, diff, debate, 0.3)
+	designer, designerTrace, err := r.runAgent(ctx, "Designer", "designer", ticketContext, diff, debate, 0.3, effectiveOptions)
 	if err != nil {
 		return ReviewOutcome{}, err
 	}
 	debate = append(debate, AgentMessage{Agent: "Designer", Content: designer})
 	trace.AgentMessages = append(trace.AgentMessages, designerTrace)
 
-	moderator, moderatorTrace, err := r.runAgent(ctx, "Moderator", "moderator", ticketContext, diff, debate, 0.1)
+	moderator, moderatorTrace, err := r.runAgent(ctx, "Moderator", "moderator", ticketContext, diff, debate, 0.1, effectiveOptions)
 	if err != nil {
 		return ReviewOutcome{}, err
 	}
@@ -115,14 +122,25 @@ func (r *OpenAIReviewer) Review(ctx context.Context, ticketContext, diff string,
 	return ReviewOutcome{Result: result, Trace: trace}, nil
 }
 
-func (r *OpenAIReviewer) runAgent(ctx context.Context, agent, role, ticketContext, diff string, previous []AgentMessage, temperature float32) (string, AgentTraceMessage, error) {
+func (r *OpenAIReviewer) resolveReviewOptions(options ReviewOptions) ReviewOptions {
+	effective := options
+	if effective.Model == "" {
+		effective.Model = r.model
+	}
+	if effective.ReasoningEffort == "" {
+		effective.ReasoningEffort = r.reasoningEffort
+	}
+	return effective
+}
+
+func (r *OpenAIReviewer) runAgent(ctx context.Context, agent, role, ticketContext, diff string, previous []AgentMessage, temperature float32, options ReviewOptions) (string, AgentTraceMessage, error) {
 	systemPrompt, err := ComposeSystemPrompt(r.skills, role)
 	if err != nil {
 		return "", AgentTraceMessage{}, err
 	}
-	userPrompt := buildUserPrompt(ticketContext, diff, previous)
+	userPrompt := buildUserPrompt(ticketContext, diff, previous, options.AdditionalInstruction)
 
-	resp, err := r.client.Chat.Completions.New(ctx, buildChatCompletionParams(r.model, r.reasoningEffort, systemPrompt, userPrompt, float64(temperature)))
+	resp, err := r.client.Chat.Completions.New(ctx, buildChatCompletionParams(options.Model, options.ReasoningEffort, systemPrompt, userPrompt, float64(temperature)))
 	if err != nil {
 		return "", AgentTraceMessage{}, wrapAgentRunError(agent, err)
 	}
@@ -165,12 +183,18 @@ func buildAgentTraceMessage(agent, systemPrompt, userPrompt, output string, incl
 	return message
 }
 
-func buildUserPrompt(ticketContext, diff string, previous []AgentMessage) string {
+func buildUserPrompt(ticketContext, diff string, previous []AgentMessage, additionalInstruction string) string {
 	var b strings.Builder
 	b.WriteString("=== JIRA TICKET ===\n")
 	b.WriteString(ticketContext)
 	b.WriteString("\n\n=== MR DIFF ===\n")
 	b.WriteString(diff)
+
+	if additionalInstruction != "" {
+		b.WriteString("\n\n=== USER REVIEW INSTRUCTIONS ===\n")
+		b.WriteString("The following instruction is user-provided review scope guidance. Apply it when evaluating the diff.\n")
+		b.WriteString(additionalInstruction)
+	}
 
 	if len(previous) > 0 {
 		b.WriteString("\n\n=== PREVIOUS AGENT ANALYSIS ===\n")

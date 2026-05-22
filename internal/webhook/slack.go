@@ -80,6 +80,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeSlackMessage(w, err.Error())
 		return
 	}
+	if err := populateOptions(&parsed, values); err != nil {
+		writeSlackMessage(w, err.Error())
+		return
+	}
 	key := inFlightReviewKey{projectPath: parsed.ProjectPath, mrIID: parsed.MRIID, issueKey: parsed.IssueKey}
 	if !h.inFlight.tryAcquire(key) {
 		writeSlackMessage(w, ":hourglass_flowing_sand: I'm still reviewing that merge request. Wait for my review before asking me to review it again.")
@@ -157,8 +161,8 @@ func (h *Handler) verifySignature(header http.Header, body []byte) error {
 
 func (h *Handler) parseCommand(text, responseURL string) (review.Request, error) {
 	args := strings.Fields(text)
-	if len(args) != 2 {
-		return review.Request{}, fmt.Errorf("Usage: /review <gitlab-mr-url> <jira-ticket-url>. The URLs can be in either order.")
+	if len(args) < 1 || len(args) > 2 {
+		return review.Request{}, fmt.Errorf("Usage: /review <gitlab-mr-url> [jira-ticket-url]. The URLs can be in either order.")
 	}
 
 	var req review.Request
@@ -192,15 +196,36 @@ func (h *Handler) parseCommand(text, responseURL string) (review.Request, error)
 			req.IssueKey = issueKey
 			req.TicketURL = arg
 			foundTicket = true
+			continue
+		}
+
+		if len(args) == 2 {
+			return review.Request{}, fmt.Errorf("Invalid Jira ticket URL: Expected one Jira ticket URL as the optional second argument.")
 		}
 	}
 
-	if !foundMR || !foundTicket {
-		return review.Request{}, fmt.Errorf("Expected one Jira ticket URL and one GitLab MR URL. The URLs can be in either order.")
+	if !foundMR {
+		return review.Request{}, fmt.Errorf("Expected one GitLab MR URL and optional Jira ticket URL. The URLs can be in either order.")
 	}
 	req.ResponseURL = responseURL
 
 	return req, nil
+}
+
+func populateOptions(req *review.Request, values url.Values) error {
+	req.Model = strings.TrimSpace(values.Get("model"))
+	req.ReasoningEffort = strings.ToLower(strings.TrimSpace(values.Get("reasoning_effort")))
+	req.AdditionalInstruction = strings.TrimSpace(values.Get("additional_instruction"))
+
+	if req.ReasoningEffort == "" {
+		return nil
+	}
+	for _, allowed := range []string{"low", "medium", "high", "xhigh"} {
+		if req.ReasoningEffort == allowed {
+			return nil
+		}
+	}
+	return fmt.Errorf("reasoning_effort must be one of: low, medium, high, xhigh")
 }
 
 func writeSlackMessage(w http.ResponseWriter, text string) {

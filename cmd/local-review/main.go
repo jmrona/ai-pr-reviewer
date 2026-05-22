@@ -76,11 +76,7 @@ func run() error {
 	}
 
 	stdin := bufio.NewReader(os.Stdin)
-	mrURL, err := prompt(os.Stderr, stdin, "GitLab MR URL: ")
-	if err != nil {
-		return err
-	}
-	ticketURL, err := prompt(os.Stderr, stdin, "Jira ticket URL: ")
+	input, err := promptReviewInputs(os.Stderr, stdin, env)
 	if err != nil {
 		return err
 	}
@@ -98,7 +94,7 @@ func run() error {
 	}
 	submittedAt := time.Now()
 
-	if err := submitReview(ctx, port, env["SLACK_SIGNING_SECRET"], mrURL, ticketURL, callback.responseURL); err != nil {
+	if err := submitReview(ctx, port, env["SLACK_SIGNING_SECRET"], input, callback.responseURL); err != nil {
 		return err
 	}
 
@@ -106,7 +102,7 @@ func run() error {
 		return err
 	}
 
-	tracePath, err := selectNewestMatchingTrace(traceDir, before, submittedAt, mrURL, ticketURL)
+	tracePath, err := selectNewestMatchingTrace(traceDir, before, submittedAt, input.MRURL, input.TicketURL)
 	if err != nil {
 		return fmt.Errorf("extracting trace failed in %s after callback was received: %w", traceDir, err)
 	}
@@ -352,7 +348,49 @@ func terminateChild(server *localServer) {
 	}
 }
 
-func prompt(stderr io.Writer, stdin *bufio.Reader, label string) (string, error) {
+type reviewInput struct {
+	MRURL                 string
+	TicketURL             string
+	Model                 string
+	ReasoningEffort       string
+	AdditionalInstruction string
+}
+
+func promptReviewInputs(stderr io.Writer, stdin *bufio.Reader, env map[string]string) (reviewInput, error) {
+	mrURL, err := promptRequired(stderr, stdin, "GitLab MR URL: ")
+	if err != nil {
+		return reviewInput{}, err
+	}
+	ticketURL, err := promptOptional(stderr, stdin, "Jira ticket URL (optional): ")
+	if err != nil {
+		return reviewInput{}, err
+	}
+	model, err := promptOptionalWithDefault(stderr, stdin, "Model override", env["OPENAI_MODEL"])
+	if err != nil {
+		return reviewInput{}, err
+	}
+	reasoningEffort, err := promptOptionalWithDefault(stderr, stdin, "Reasoning effort override", env["OPENAI_REASONING_EFFORT"])
+	if err != nil {
+		return reviewInput{}, err
+	}
+	reasoningEffort = normaliseReasoningEffort(reasoningEffort)
+	if err := validateReasoningEffort(reasoningEffort); err != nil {
+		return reviewInput{}, err
+	}
+	additionalInstruction, err := promptOptional(stderr, stdin, "Additional review instruction/comment (optional): ")
+	if err != nil {
+		return reviewInput{}, err
+	}
+	return reviewInput{
+		MRURL:                 mrURL,
+		TicketURL:             ticketURL,
+		Model:                 model,
+		ReasoningEffort:       reasoningEffort,
+		AdditionalInstruction: additionalInstruction,
+	}, nil
+}
+
+func promptRequired(stderr io.Writer, stdin *bufio.Reader, label string) (string, error) {
 	_, _ = fmt.Fprint(stderr, label)
 	value, err := stdin.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
@@ -363,6 +401,46 @@ func prompt(stderr io.Writer, stdin *bufio.Reader, label string) (string, error)
 		return "", fmt.Errorf("%s is required", strings.TrimSuffix(label, ": "))
 	}
 	return value, nil
+}
+
+func promptOptional(stderr io.Writer, stdin *bufio.Reader, label string) (string, error) {
+	_, _ = fmt.Fprint(stderr, label)
+	value, err := stdin.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("reading prompt: %w", err)
+	}
+	return strings.TrimSpace(value), nil
+}
+
+func promptOptionalWithDefault(stderr io.Writer, stdin *bufio.Reader, label, defaultValue string) (string, error) {
+	promptLabel := label + ": "
+	if strings.TrimSpace(defaultValue) != "" {
+		promptLabel = label + " [" + strings.TrimSpace(defaultValue) + "]: "
+	}
+	value, err := promptOptional(stderr, stdin, promptLabel)
+	if err != nil {
+		return "", err
+	}
+	if value == "" {
+		return strings.TrimSpace(defaultValue), nil
+	}
+	return value, nil
+}
+
+func normaliseReasoningEffort(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func validateReasoningEffort(value string) error {
+	if value == "" {
+		return nil
+	}
+	switch value {
+	case "low", "medium", "high", "xhigh":
+		return nil
+	default:
+		return fmt.Errorf("invalid reasoning effort %q; must be one of low, medium, high, xhigh", value)
+	}
 }
 
 type callbackServer struct {
@@ -404,10 +482,19 @@ func (s callbackServer) close(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
-func submitReview(ctx context.Context, port, signingSecret, mrURL, ticketURL, responseURL string) error {
+func submitReview(ctx context.Context, port, signingSecret string, input reviewInput, responseURL string) error {
 	values := url.Values{}
-	values.Set("text", mrURL+" "+ticketURL)
+	values.Set("text", reviewText(input))
 	values.Set("response_url", responseURL)
+	if input.Model != "" {
+		values.Set("model", input.Model)
+	}
+	if input.ReasoningEffort != "" {
+		values.Set("reasoning_effort", input.ReasoningEffort)
+	}
+	if input.AdditionalInstruction != "" {
+		values.Set("additional_instruction", input.AdditionalInstruction)
+	}
 	rawBody := []byte(values.Encode())
 	timestamp := fmt.Sprintf("%d", time.Now().Unix())
 
@@ -430,6 +517,13 @@ func submitReview(ctx context.Context, port, signingSecret, mrURL, ticketURL, re
 		return fmt.Errorf("initial request failed")
 	}
 	return nil
+}
+
+func reviewText(input reviewInput) string {
+	if input.TicketURL == "" {
+		return input.MRURL
+	}
+	return input.MRURL + " " + input.TicketURL
 }
 
 func signSlackRequest(secret, timestamp string, rawBody []byte) string {
@@ -513,7 +607,12 @@ func selectNewestMatchingTrace(traceDir string, before map[string]time.Time, sub
 			return err
 		}
 		text := string(content)
-		if containsFieldLine(text, "MR URL", mrURL) && containsFieldLine(text, "Ticket URL", ticketURL) {
+		matchesMR := containsFieldLine(text, "MR URL", mrURL)
+		matchesTicket := containsFieldLine(text, "Ticket URL", ticketURL)
+		if ticketURL == "" {
+			matchesTicket = hasBlankOrAbsentFieldLine(text, "Ticket URL")
+		}
+		if matchesMR && matchesTicket {
 			candidates = append(candidates, candidate{path: path, modTime: info.ModTime()})
 		}
 		return nil
@@ -522,7 +621,7 @@ func selectNewestMatchingTrace(traceDir string, before map[string]time.Time, sub
 		return "", err
 	}
 	if len(candidates) == 0 {
-		return "", fmt.Errorf("no new or modified trace contained both exact URLs")
+		return "", fmt.Errorf("no new or modified trace matched the review input")
 	}
 	sort.Slice(candidates, func(i, j int) bool {
 		return candidates[i].modTime.After(candidates[j].modTime)
@@ -538,6 +637,21 @@ func containsFieldLine(content, field, value string) bool {
 		}
 	}
 	return false
+}
+
+func hasBlankOrAbsentFieldLine(content, field string) bool {
+	prefix := field + ":"
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == prefix {
+			return true
+		}
+		value, found := strings.CutPrefix(trimmed, prefix+" ")
+		if found {
+			return strings.TrimSpace(value) == ""
+		}
+	}
+	return true
 }
 
 func extractParsedReviewResult(content []byte) (string, error) {

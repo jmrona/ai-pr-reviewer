@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -60,6 +61,163 @@ func TestHandlerAcceptsURLsInEitherOrder(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("processor was not called")
 		}
+	}
+}
+
+func TestHandlerAcceptsMergeRequestWithoutJiraTicket(t *testing.T) {
+	processor := &fakeProcessor{done: make(chan review.Request, 1)}
+	handler := newTestHandler(processor)
+	body := url.Values{
+		"text":         {"https://gitlab.example.com/platform/application/-/merge_requests/108"},
+		"response_url": {"https://hooks.slack.com/response"},
+	}.Encode()
+	req := signedRequest(body, handler.signingSecret, handler.now())
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Reviewing MR") {
+		t.Fatalf("body = %q, want reviewing acknowledgement", rec.Body.String())
+	}
+
+	select {
+	case got := <-processor.done:
+		if got.IssueKey != "" || got.TicketURL != "" || got.ProjectPath != "platform/application" || got.MRIID != 108 {
+			t.Fatalf("request = %#v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("processor was not called")
+	}
+}
+
+func TestHandlerRejectsExtraCommandArguments(t *testing.T) {
+	processor := &fakeProcessor{done: make(chan review.Request, 1)}
+	handler := newTestHandler(processor)
+	body := url.Values{
+		"text":         {"https://gitlab.example.com/platform/application/-/merge_requests/108 https://jira.example.com/browse/PROJ-141 unexpected"},
+		"response_url": {"https://hooks.slack.com/response"},
+	}.Encode()
+	req := signedRequest(body, handler.signingSecret, handler.now())
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Usage: /review") || !strings.Contains(rec.Body.String(), "[jira-ticket-url]") {
+		t.Fatalf("body = %q, want usage error", rec.Body.String())
+	}
+	select {
+	case got := <-processor.done:
+		t.Fatalf("processor was called for invalid request: %#v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestHandlerPopulatesOptionalReviewFields(t *testing.T) {
+	processor := &fakeProcessor{done: make(chan review.Request, 1)}
+	handler := newTestHandler(processor)
+	body := url.Values{
+		"text":                   {"https://gitlab.example.com/platform/application/-/merge_requests/108"},
+		"response_url":           {"https://hooks.slack.com/response"},
+		"model":                  {"  gpt-5.1  "},
+		"reasoning_effort":       {"  high  "},
+		"additional_instruction": {"  focus on regressions  "},
+	}.Encode()
+	req := signedRequest(body, handler.signingSecret, handler.now())
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "Reviewing MR") {
+		t.Fatalf("body = %q, want reviewing acknowledgement", rec.Body.String())
+	}
+	select {
+	case got := <-processor.done:
+		assertRequestStringField(t, got, "Model", "gpt-5.1")
+		assertRequestStringField(t, got, "ReasoningEffort", "high")
+		assertRequestStringField(t, got, "AdditionalInstruction", "focus on regressions")
+	case <-time.After(time.Second):
+		t.Fatal("processor was not called")
+	}
+}
+
+func TestHandlerNormalisesReasoningEffortOverride(t *testing.T) {
+	processor := &fakeProcessor{done: make(chan review.Request, 1)}
+	handler := newTestHandler(processor)
+	body := url.Values{
+		"text":             {"https://gitlab.example.com/platform/application/-/merge_requests/108"},
+		"response_url":     {"https://hooks.slack.com/response"},
+		"reasoning_effort": {" XHIGH "},
+	}.Encode()
+	req := signedRequest(body, handler.signingSecret, handler.now())
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "Reviewing MR") {
+		t.Fatalf("body = %q, want reviewing acknowledgement", rec.Body.String())
+	}
+	select {
+	case got := <-processor.done:
+		assertRequestStringField(t, got, "ReasoningEffort", "xhigh")
+	case <-time.After(time.Second):
+		t.Fatal("processor was not called")
+	}
+}
+
+func TestHandlerRejectsInvalidReasoningEffort(t *testing.T) {
+	processor := &fakeProcessor{done: make(chan review.Request, 1)}
+	handler := newTestHandler(processor)
+	body := url.Values{
+		"text":             {"https://gitlab.example.com/platform/application/-/merge_requests/108"},
+		"response_url":     {"https://hooks.slack.com/response"},
+		"reasoning_effort": {"extreme"},
+	}.Encode()
+	req := signedRequest(body, handler.signingSecret, handler.now())
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "reasoning_effort must be one of: low, medium, high, xhigh") {
+		t.Fatalf("body = %q, want reasoning effort error", rec.Body.String())
+	}
+	select {
+	case got := <-processor.done:
+		t.Fatalf("processor was called for invalid request: %#v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestHandlerRejectsInvalidSecondArgument(t *testing.T) {
+	processor := &fakeProcessor{done: make(chan review.Request, 1)}
+	handler := newTestHandler(processor)
+	body := url.Values{
+		"text":         {"https://gitlab.example.com/platform/application/-/merge_requests/108 https://not-jira.example.com/browse/PROJ-141"},
+		"response_url": {"https://hooks.slack.com/response"},
+	}.Encode()
+	req := signedRequest(body, handler.signingSecret, handler.now())
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Invalid Jira ticket URL") {
+		t.Fatalf("body = %q, want invalid Jira ticket URL error", rec.Body.String())
+	}
+	select {
+	case got := <-processor.done:
+		t.Fatalf("processor was called for invalid request: %#v", got)
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 
@@ -116,6 +274,47 @@ func TestHandlerRejectsDuplicateInFlightReviewUsingParsedKey(t *testing.T) {
 	if secondRec.Code != http.StatusOK {
 		t.Fatalf("second status = %d, want 200", secondRec.Code)
 	}
+	if !strings.Contains(secondRec.Body.String(), "I'm still reviewing that merge request") {
+		t.Fatalf("second body = %q, want duplicate in-flight message", secondRec.Body.String())
+	}
+	select {
+	case got := <-processor.started:
+		t.Fatalf("processor was called for duplicate request: %#v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestHandlerRejectsDuplicateInFlightReviewWithoutJiraTicket(t *testing.T) {
+	processor := &blockingProcessor{
+		started:  make(chan review.Request, 2),
+		release:  make(chan struct{}),
+		finished: make(chan struct{}, 2),
+	}
+	t.Cleanup(func() { close(processor.release) })
+	handler := newTestHandler(processor)
+
+	firstBody := url.Values{"text": {"https://gitlab.example.com/platform/application/-/merge_requests/108?ignored=one"}, "response_url": {"https://hooks.slack.com/response"}}.Encode()
+	firstReq := signedRequest(firstBody, handler.signingSecret, handler.now())
+	firstRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstRec, firstReq)
+
+	if !strings.Contains(firstRec.Body.String(), "Reviewing MR") {
+		t.Fatalf("first body = %q, want reviewing acknowledgement", firstRec.Body.String())
+	}
+	select {
+	case got := <-processor.started:
+		if got.IssueKey != "" || got.ProjectPath != "platform/application" || got.MRIID != 108 {
+			t.Fatalf("request = %#v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("processor was not called")
+	}
+
+	secondBody := url.Values{"text": {"https://gitlab.example.com/platform/application/-/merge_requests/108?ignored=two"}, "response_url": {"https://hooks.slack.com/response"}}.Encode()
+	secondReq := signedRequest(secondBody, handler.signingSecret, handler.now())
+	secondRec := httptest.NewRecorder()
+	handler.ServeHTTP(secondRec, secondReq)
+
 	if !strings.Contains(secondRec.Body.String(), "I'm still reviewing that merge request") {
 		t.Fatalf("second body = %q, want duplicate in-flight message", secondRec.Body.String())
 	}
@@ -299,6 +498,20 @@ func signedRequest(body, secret string, now time.Time) *http.Request {
 	req.Header.Set("X-Slack-Request-Timestamp", timestamp)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	return req
+}
+
+func assertRequestStringField(t *testing.T, req review.Request, fieldName, want string) {
+	t.Helper()
+	field := reflect.ValueOf(req).FieldByName(fieldName)
+	if !field.IsValid() {
+		t.Fatalf("review.Request missing %s field", fieldName)
+	}
+	if field.Kind() != reflect.String {
+		t.Fatalf("review.Request.%s kind = %s, want string", fieldName, field.Kind())
+	}
+	if got := field.String(); got != want {
+		t.Fatalf("review.Request.%s = %q, want %q", fieldName, got, want)
+	}
 }
 
 func strconvFormat(value int64) string {

@@ -13,12 +13,15 @@ import (
 )
 
 type Request struct {
-	ResponseURL string
-	MRURL       string
-	TicketURL   string
-	ProjectPath string
-	MRIID       int
-	IssueKey    string
+	ResponseURL           string
+	MRURL                 string
+	TicketURL             string
+	ProjectPath           string
+	MRIID                 int
+	IssueKey              string
+	Model                 string
+	ReasoningEffort       string
+	AdditionalInstruction string
 }
 
 type ChangeFetcher interface {
@@ -30,7 +33,7 @@ type TicketFetcher interface {
 }
 
 type Reviewer interface {
-	Review(ctx context.Context, ticketContext, diff string, diffTruncated bool) (agents.ReviewOutcome, error)
+	Review(ctx context.Context, ticketContext, diff string, diffTruncated bool, options agents.ReviewOptions) (agents.ReviewOutcome, error)
 }
 
 type SlackPoster interface {
@@ -51,6 +54,8 @@ type Orchestrator struct {
 	logger      *slog.Logger
 	traceWriter TraceWriter
 }
+
+const noTicketContext = "No Jira ticket context was provided for this review."
 
 func NewOrchestrator(changes ChangeFetcher, tickets TicketFetcher, reviewer Reviewer, poster SlackPoster, logger *slog.Logger, options ...OrchestratorOption) *Orchestrator {
 	orchestrator := &Orchestrator{changes: changes, tickets: tickets, reviewer: reviewer, poster: poster, logger: logger}
@@ -87,14 +92,22 @@ func (o *Orchestrator) process(ctx context.Context, req Request) error {
 		return fmt.Errorf("GitLab fetch failed: %w", err)
 	}
 
-	o.logger.InfoContext(ctx, "fetching Jira issue", slog.String("issue_key", req.IssueKey))
-	ticketContext, err := o.tickets.FetchTicketContext(ctx, req.IssueKey)
-	if err != nil {
-		return fmt.Errorf("Jira fetch failed: %w", err)
+	ticketContext := noTicketContext
+	if req.IssueKey != "" {
+		o.logger.InfoContext(ctx, "fetching Jira issue", slog.String("issue_key", req.IssueKey))
+		var err error
+		ticketContext, err = o.tickets.FetchTicketContext(ctx, req.IssueKey)
+		if err != nil {
+			return fmt.Errorf("Jira fetch failed: %w", err)
+		}
 	}
 
 	o.logger.InfoContext(ctx, "running OpenAI review")
-	outcome, err := o.reviewer.Review(ctx, ticketContext, diff, truncated)
+	outcome, err := o.reviewer.Review(ctx, ticketContext, diff, truncated, agents.ReviewOptions{
+		Model:                 req.Model,
+		ReasoningEffort:       req.ReasoningEffort,
+		AdditionalInstruction: req.AdditionalInstruction,
+	})
 	if err != nil {
 		return fmt.Errorf("OpenAI review failed: %w", err)
 	}

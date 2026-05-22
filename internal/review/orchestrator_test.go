@@ -15,7 +15,7 @@ import (
 
 func TestOrchestratorPostsSuccess(t *testing.T) {
 	poster := &fakePoster{}
-	orchestrator := NewOrchestrator(fakeChanges{}, fakeTickets{}, fakeReviewer{}, poster, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	orchestrator := NewOrchestrator(fakeChanges{}, &fakeTickets{}, &fakeReviewer{}, poster, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	orchestrator.Process(context.Background(), Request{ResponseURL: "response", MRURL: "mr", ProjectPath: "org/repo", MRIID: 1, IssueKey: "PROJ-141"})
 
@@ -27,7 +27,7 @@ func TestOrchestratorPostsSuccess(t *testing.T) {
 func TestOrchestratorWritesTraceOnSuccess(t *testing.T) {
 	poster := &fakePoster{}
 	traceWriter := &fakeTraceWriter{path: "trace.md"}
-	orchestrator := NewOrchestrator(fakeChanges{}, fakeTickets{}, fakeReviewer{}, poster, slog.New(slog.NewTextHandler(io.Discard, nil)), WithTraceWriter(traceWriter))
+	orchestrator := NewOrchestrator(fakeChanges{}, &fakeTickets{}, &fakeReviewer{}, poster, slog.New(slog.NewTextHandler(io.Discard, nil)), WithTraceWriter(traceWriter))
 
 	orchestrator.Process(context.Background(), Request{ResponseURL: "response", MRURL: "mr", ProjectPath: "org/repo", MRIID: 1, IssueKey: "PROJ-141"})
 
@@ -51,7 +51,7 @@ func TestOrchestratorWritesTraceOnSuccess(t *testing.T) {
 
 func TestOrchestratorWritesNoTraceWhenTraceWriterIsNil(t *testing.T) {
 	poster := &fakePoster{}
-	orchestrator := NewOrchestrator(fakeChanges{}, fakeTickets{}, fakeReviewer{}, poster, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	orchestrator := NewOrchestrator(fakeChanges{}, &fakeTickets{}, &fakeReviewer{}, poster, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	orchestrator.Process(context.Background(), Request{ResponseURL: "response", MRURL: "mr", ProjectPath: "org/repo", MRIID: 1, IssueKey: "PROJ-141"})
 
@@ -60,11 +60,52 @@ func TestOrchestratorWritesNoTraceWhenTraceWriterIsNil(t *testing.T) {
 	}
 }
 
+func TestOrchestratorSkipsJiraFetchWhenIssueKeyIsEmpty(t *testing.T) {
+	poster := &fakePoster{}
+	reviewer := &fakeReviewer{}
+	tickets := &fakeTickets{err: errors.New("unexpected Jira fetch")}
+	orchestrator := NewOrchestrator(fakeChanges{}, tickets, reviewer, poster, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	orchestrator.Process(context.Background(), Request{ResponseURL: "response", MRURL: "mr", ProjectPath: "org/repo", MRIID: 1})
+
+	if tickets.calls != 0 {
+		t.Fatalf("Jira fetch calls = %d, want 0", tickets.calls)
+	}
+	if reviewer.ticketContext != "No Jira ticket context was provided for this review." {
+		t.Fatalf("ticket context = %q", reviewer.ticketContext)
+	}
+	if len(poster.messages) != 1 || !strings.Contains(poster.messages[0], "AI PR Review") {
+		t.Fatalf("messages = %#v", poster.messages)
+	}
+}
+
+func TestOrchestratorPassesReviewOptionsToReviewer(t *testing.T) {
+	poster := &fakePoster{}
+	reviewer := &fakeReviewer{}
+	orchestrator := NewOrchestrator(fakeChanges{}, &fakeTickets{}, reviewer, poster, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	orchestrator.Process(context.Background(), Request{
+		ResponseURL:           "response",
+		MRURL:                 "mr",
+		ProjectPath:           "org/repo",
+		MRIID:                 1,
+		IssueKey:              "PROJ-141",
+		Model:                 "gpt-5.5",
+		ReasoningEffort:       "high",
+		AdditionalInstruction: "Only review auth changes.",
+	})
+
+	want := agents.ReviewOptions{Model: "gpt-5.5", ReasoningEffort: "high", AdditionalInstruction: "Only review auth changes."}
+	if reviewer.options != want {
+		t.Fatalf("review options = %#v, want %#v", reviewer.options, want)
+	}
+}
+
 func TestOrchestratorWritesNoTraceWhenTraceWriterIsDisabled(t *testing.T) {
 	poster := &fakePoster{}
 	dir := t.TempDir()
 	traceWriter := trace.NewWriter(false, dir, false, nil)
-	orchestrator := NewOrchestrator(fakeChanges{}, fakeTickets{}, fakeReviewer{}, poster, slog.New(slog.NewTextHandler(io.Discard, nil)), WithTraceWriter(traceWriter))
+	orchestrator := NewOrchestrator(fakeChanges{}, &fakeTickets{}, &fakeReviewer{}, poster, slog.New(slog.NewTextHandler(io.Discard, nil)), WithTraceWriter(traceWriter))
 
 	orchestrator.Process(context.Background(), Request{ResponseURL: "response", MRURL: "mr", ProjectPath: "org/repo", MRIID: 1, IssueKey: "PROJ-141"})
 
@@ -83,7 +124,7 @@ func TestOrchestratorWritesNoTraceWhenTraceWriterIsDisabled(t *testing.T) {
 func TestOrchestratorStillPostsSlackResultWhenTraceWriterReturnsError(t *testing.T) {
 	poster := &fakePoster{}
 	traceWriter := &fakeTraceWriter{err: errors.New("trace failed")}
-	orchestrator := NewOrchestrator(fakeChanges{}, fakeTickets{}, fakeReviewer{}, poster, slog.New(slog.NewTextHandler(io.Discard, nil)), WithTraceWriter(traceWriter))
+	orchestrator := NewOrchestrator(fakeChanges{}, &fakeTickets{}, &fakeReviewer{}, poster, slog.New(slog.NewTextHandler(io.Discard, nil)), WithTraceWriter(traceWriter))
 
 	orchestrator.Process(context.Background(), Request{ResponseURL: "response", MRURL: "mr", ProjectPath: "org/repo", MRIID: 1, IssueKey: "PROJ-141"})
 
@@ -97,7 +138,7 @@ func TestOrchestratorStillPostsSlackResultWhenTraceWriterReturnsError(t *testing
 
 func TestOrchestratorPostsSafeError(t *testing.T) {
 	poster := &fakePoster{}
-	orchestrator := NewOrchestrator(fakeChanges{err: errors.New("boom")}, fakeTickets{}, fakeReviewer{}, poster, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	orchestrator := NewOrchestrator(fakeChanges{err: errors.New("boom")}, &fakeTickets{}, &fakeReviewer{}, poster, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	orchestrator.Process(context.Background(), Request{ResponseURL: "response", MRURL: "mr", ProjectPath: "org/repo", MRIID: 1, IssueKey: "PROJ-141"})
 
@@ -112,15 +153,24 @@ func (f fakeChanges) FetchChangeContext(context.Context, string, int) (string, b
 	return "diff", true, f.err
 }
 
-type fakeTickets struct{}
-
-func (fakeTickets) FetchTicketContext(context.Context, string) (string, error) {
-	return "ticket", nil
+type fakeTickets struct {
+	calls int
+	err   error
 }
 
-type fakeReviewer struct{}
+func (f *fakeTickets) FetchTicketContext(context.Context, string) (string, error) {
+	f.calls++
+	return "ticket", f.err
+}
 
-func (fakeReviewer) Review(context.Context, string, string, bool) (agents.ReviewOutcome, error) {
+type fakeReviewer struct {
+	ticketContext string
+	options       agents.ReviewOptions
+}
+
+func (f *fakeReviewer) Review(_ context.Context, ticketContext, _ string, _ bool, options agents.ReviewOptions) (agents.ReviewOutcome, error) {
+	f.ticketContext = ticketContext
+	f.options = options
 	return agents.ReviewOutcome{Result: agents.ReviewResult{TicketCoverage: ":white_check_mark: All criteria covered", Summary: "Looks good.", DiffTruncated: true}}, nil
 }
 

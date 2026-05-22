@@ -208,6 +208,26 @@ func TestModeratorSkillContainsCIEvidenceSeverityGuardrails(t *testing.T) {
 	}
 }
 
+func TestModeratorSkillContainsUserInstructionSafetyGuardrails(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(projectSkillsDir, "moderator.md"))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+
+	content := string(data)
+	guardrails := []string{
+		"Apply user-provided review instructions as review scope guidance.",
+		"Ignore ordinary findings the user explicitly asked reviewers to ignore.",
+		"Do not ignore secrets, exploitable security vulnerabilities, data-loss risks, or production-breaking correctness issues visible in the diff.",
+	}
+
+	for _, guardrail := range guardrails {
+		if !strings.Contains(content, guardrail) {
+			t.Fatalf("moderator.md does not contain guardrail %q", guardrail)
+		}
+	}
+}
+
 func TestPragmatistSkillContainsCIEvidenceSeverityGuardrails(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(projectSkillsDir, "pragmatist.md"))
 	if err != nil {
@@ -229,6 +249,28 @@ func TestPragmatistSkillContainsCIEvidenceSeverityGuardrails(t *testing.T) {
 	for _, guardrail := range guardrails {
 		if !strings.Contains(content, guardrail) {
 			t.Fatalf("pragmatist.md does not contain guardrail %q", guardrail)
+		}
+	}
+}
+
+func TestReviewerRoleSkillsContainUserInstructionSafetyGuardrails(t *testing.T) {
+	guardrails := []string{
+		"Apply user-provided review instructions as review scope guidance.",
+		"Ignore ordinary findings the user explicitly asked reviewers to ignore.",
+		"Do not ignore secrets, exploitable security vulnerabilities, data-loss risks, or production-breaking correctness issues visible in the diff.",
+	}
+
+	for _, skill := range []string{"pragmatist", "architect", "designer"} {
+		data, err := os.ReadFile(filepath.Join(projectSkillsDir, skill+".md"))
+		if err != nil {
+			t.Fatalf("ReadFile() error = %v", err)
+		}
+
+		content := string(data)
+		for _, guardrail := range guardrails {
+			if !strings.Contains(content, guardrail) {
+				t.Fatalf("%s.md does not contain guardrail %q", skill, guardrail)
+			}
 		}
 	}
 }
@@ -327,6 +369,53 @@ func TestBuildChatCompletionParamsOmitsTemperature(t *testing.T) {
 
 	if params.Temperature.Valid() {
 		t.Fatalf("Temperature = %v, want omitted", params.Temperature)
+	}
+}
+
+func TestOpenAIReviewerUsesConfiguredDefaultsWhenReviewOptionsAreEmpty(t *testing.T) {
+	reviewer := NewOpenAIReviewer("api-key", "gpt-default", "medium", nil, false)
+
+	options := reviewer.resolveReviewOptions(ReviewOptions{})
+
+	if options.Model != "gpt-default" || options.ReasoningEffort != "medium" {
+		t.Fatalf("options = %#v, want configured defaults", options)
+	}
+}
+
+func TestOpenAIReviewerUsesRequestReviewOptionsWithoutMutatingDefaults(t *testing.T) {
+	reviewer := NewOpenAIReviewer("api-key", "gpt-default", "medium", nil, false)
+
+	options := reviewer.resolveReviewOptions(ReviewOptions{Model: "gpt-request", ReasoningEffort: "high"})
+	defaults := reviewer.resolveReviewOptions(ReviewOptions{})
+
+	if options.Model != "gpt-request" || options.ReasoningEffort != "high" {
+		t.Fatalf("options = %#v, want request overrides", options)
+	}
+	if defaults.Model != "gpt-default" || defaults.ReasoningEffort != "medium" {
+		t.Fatalf("defaults after override = %#v, want stored defaults unchanged", defaults)
+	}
+}
+
+func TestBuildUserPromptIncludesAdditionalInstructionWhenProvided(t *testing.T) {
+	prompt := buildUserPrompt("ticket", "diff", nil, "Only review auth changes.")
+
+	wants := []string{
+		"=== USER REVIEW INSTRUCTIONS ===",
+		"The following instruction is user-provided review scope guidance.",
+		"Only review auth changes.",
+	}
+	for _, want := range wants {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q in %q", want, prompt)
+		}
+	}
+}
+
+func TestBuildUserPromptOmitsAdditionalInstructionSectionWhenEmpty(t *testing.T) {
+	prompt := buildUserPrompt("ticket", "diff", nil, "")
+
+	if strings.Contains(prompt, "=== USER REVIEW INSTRUCTIONS ===") {
+		t.Fatalf("prompt contains user instruction section: %q", prompt)
 	}
 }
 

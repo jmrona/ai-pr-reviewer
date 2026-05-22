@@ -27,6 +27,20 @@ func TestFormatReviewResultIncludesAssumptionsAndTruncation(t *testing.T) {
 	}
 }
 
+func TestFormatReviewResultOmitsIssueKeySegmentWhenIssueKeyIsEmpty(t *testing.T) {
+	message := FormatReviewResult(agents.ReviewResult{
+		TicketCoverage: ":white_check_mark: All criteria covered",
+		Summary:        "Looks good.",
+	}, "", "https://gitlab.example.com/platform/application/-/merge_requests/1")
+
+	if strings.Contains(message, "``") {
+		t.Fatalf("FormatReviewResult() included empty issue key segment: %q", message)
+	}
+	if !strings.Contains(message, "<https://gitlab.example.com/platform/application/-/merge_requests/1|View MR>") {
+		t.Fatalf("FormatReviewResult() missing MR link: %q", message)
+	}
+}
+
 func TestPosterPostsResponseURLPayload(t *testing.T) {
 	var gotBody string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -102,7 +102,7 @@ The helper loads `.env` from the repository root, using simple `KEY=value` lines
 
 `SLACK_SIGNING_SECRET` is required because the helper submits to the local `/slack/review` endpoint with a real Slack-compatible HMAC signature. The submitted `response_url` points to a loopback-only callback server on `127.0.0.1`; nothing is sent to Slack or any other external callback service.
 
-If `http://127.0.0.1:<PORT>/health` is already healthy, the helper reuses that server and will not stop it. When reusing an existing server, it must already have review traces enabled and must write traces that include the exact GitLab MR URL and Jira ticket URL. Set:
+If `http://127.0.0.1:<PORT>/health` is already healthy, the helper reuses that server and will not stop it. When reusing an existing server, it must already have review traces enabled and must write traces that include the exact GitLab MR URL and any Jira ticket URL provided. Set:
 
 ```sh
 REVIEW_TRACE_ENABLED=true
@@ -111,7 +111,11 @@ REVIEW_TRACE_DIR=.review-traces
 
 If no healthy server is running, the helper starts `go run ./cmd/server`, forces `REVIEW_TRACE_ENABLED=true`, defaults `REVIEW_TRACE_DIR` to `.review-traces`, writes server logs to `.local-review-server.log`, and stops only that child server when the helper exits.
 
-The helper prompts on stderr for the GitLab MR URL and Jira ticket URL. Progress, prompts, errors, and diagnostics are written to stderr. On success, stdout contains only the extracted content between `## Parsed Review Result` and `## Final Slack Message` from the newest matching trace.
+The helper prompts on stderr for the GitLab MR URL, optional Jira ticket URL, model, reasoning effort, and optional additional review instruction. Model and reasoning prompts show their local environment defaults, such as `OPENAI_MODEL` and `OPENAI_REASONING_EFFORT`, because these values are not secret. Valid reasoning effort values are `low`, `medium`, `high`, and `xhigh`.
+
+The optional additional instruction guides review scope, such as asking the reviewer to focus on a specific risk or implementation area. It cannot suppress safety-critical findings visible in the diff, including secrets, exploitable security vulnerabilities, data-loss risks, or production-breaking correctness issues.
+
+Progress, prompts, errors, and diagnostics are written to stderr. On success, stdout contains only the extracted content between `## Parsed Review Result` and `## Final Slack Message` from the newest matching trace.
 
 #### Example output
 
