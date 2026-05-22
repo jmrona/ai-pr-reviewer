@@ -206,12 +206,24 @@ func renderParsedReviewResult(result string) string {
 			}
 			continue
 		}
+		line = renderTerminalEmojiShortcodes(line)
 		level, heading, ok := parseMarkdownHeading(line)
 		if ok {
 			lines[i] = headingStyle(level) + heading + "\x1b[0m"
+			continue
 		}
+		lines[i] = line
 	}
 	return strings.Join(lines, "\n")
+}
+
+func renderTerminalEmojiShortcodes(line string) string {
+	replacer := strings.NewReplacer(
+		":white_check_mark:", "✅",
+		":warning:", "⚠️",
+		":x:", "❌",
+	)
+	return replacer.Replace(line)
 }
 
 func markdownFenceLength(line string) int {

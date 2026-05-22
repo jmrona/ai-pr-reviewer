@@ -504,6 +504,7 @@ func TestRenderParsedReviewResultKeepsFencedCodeBlocksUnchanged(t *testing.T) {
 		"```",
 		"# comment inside code",
 		"#### also code",
+		":warning: literal shortcode",
 		"```",
 	}, "\n")
 
@@ -514,7 +515,27 @@ func TestRenderParsedReviewResultKeepsFencedCodeBlocksUnchanged(t *testing.T) {
 		"```",
 		"# comment inside code",
 		"#### also code",
+		":warning: literal shortcode",
 		"```",
+	}, "\n")
+	if rendered != want {
+		t.Fatalf("rendered = %q, want %q", rendered, want)
+	}
+}
+
+func TestRenderParsedReviewResultReplacesSlackEmojiShortcodesOutsideFences(t *testing.T) {
+	result := strings.Join([]string{
+		"#### Ticket Coverage",
+		":warning: Partially covered - missing generated files.",
+		"Status: :white_check_mark: covered, :x: blocked, :mag: unchanged.",
+	}, "\n")
+
+	rendered := renderParsedReviewResult(result)
+
+	want := strings.Join([]string{
+		"\x1b[1;33mTicket Coverage\x1b[0m",
+		"⚠️ Partially covered - missing generated files.",
+		"Status: ✅ covered, ❌ blocked, :mag: unchanged.",
 	}, "\n")
 	if rendered != want {
 		t.Fatalf("rendered = %q, want %q", rendered, want)
