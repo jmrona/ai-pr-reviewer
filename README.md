@@ -1,3 +1,5 @@
+![AI PR Reviewer overview](docs/assets/ai-pr-reviewer-overview.webp)
+
 # ai-pr-reviewer
 
 `ai-pr-reviewer` is a stateless Slack slash-command service that runs an AI-assisted merge request review. A developer runs `/review` with a GitLab merge request URL and a Jira ticket URL, and the service fetches both contexts, runs a multi-agent OpenAI review, and posts the result back to Slack.
