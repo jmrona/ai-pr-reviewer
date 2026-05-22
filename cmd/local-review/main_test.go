@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -351,6 +352,64 @@ func TestFormatFinalReviewOutputEndsWithReviewBlankLineElapsedLineAndFinalNewlin
 	}
 }
 
+func TestCallbackServerPrintsProgressToStderrWithoutCompleting(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var stderr bytes.Buffer
+	callback, err := startCallbackServer(ctx, &stderr)
+	if err != nil {
+		t.Fatalf("startCallbackServer() error = %v", err)
+	}
+	defer func() { _ = callback.close(context.Background()) }()
+
+	postCallback(t, callback.responseURL, map[string]string{"type": "progress", "message": "Fetching merge request context..."})
+
+	if got := stderr.String(); got != "\r[review] Fetching merge request context...\n" {
+		t.Fatalf("stderr = %q, want progress line", got)
+	}
+	select {
+	case <-callback.done:
+		t.Fatal("progress callback closed done; want final callback only")
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestCallbackServerClosesDoneForFinalCallback(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	callback, err := startCallbackServer(ctx, io.Discard)
+	if err != nil {
+		t.Fatalf("startCallbackServer() error = %v", err)
+	}
+	defer func() { _ = callback.close(context.Background()) }()
+
+	postCallback(t, callback.responseURL, map[string]string{"text": "final result"})
+
+	select {
+	case <-callback.done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for final callback to close done")
+	}
+}
+
+func TestWaitForCallbackPrintsReviewCompleteWithoutChangingFinalOutputFormatting(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+	var stderr bytes.Buffer
+
+	if err := waitForCallback(context.Background(), done, time.Second, &stderr); err != nil {
+		t.Fatalf("waitForCallback() error = %v", err)
+	}
+	if got := stderr.String(); got != "\r[review] Review complete.        \n" {
+		t.Fatalf("stderr = %q, want review complete progress line", got)
+	}
+
+	output := formatFinalReviewOutput("Rendered review", "Review completed in 1s")
+	if output != "Rendered review\n\nReview completed in 1s\n" {
+		t.Fatalf("final output = %q, want unchanged stdout formatting", output)
+	}
+}
+
 func TestAppendElapsedReviewTimeToTraceWritesCleanMarkdownSpacing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "trace.md")
 	if err := os.WriteFile(path, []byte("## Final Slack Message\nReview body"), 0o600); err != nil {
@@ -474,6 +533,22 @@ func TestRenderParsedReviewResultKeepsLongFencedCodeBlocksUnchanged(t *testing.T
 
 	if rendered != result {
 		t.Fatalf("rendered = %q, want unchanged result", rendered)
+	}
+}
+
+func postCallback(t *testing.T, responseURL string, payload map[string]string) {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshalling callback payload: %v", err)
+	}
+	resp, err := http.Post(responseURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("posting callback: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("callback status = %d, want 200", resp.StatusCode)
 	}
 }
 

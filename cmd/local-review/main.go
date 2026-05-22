@@ -7,6 +7,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -83,7 +84,7 @@ func run() error {
 		return err
 	}
 
-	callback, err := startCallbackServer(ctx)
+	callback, err := startCallbackServer(ctx, os.Stderr)
 	if err != nil {
 		return err
 	}
@@ -100,7 +101,7 @@ func run() error {
 		return err
 	}
 
-	if err := waitForCallback(ctx, callback.done, waitTimeout); err != nil {
+	if err := waitForCallback(ctx, callback.done, waitTimeout, os.Stderr); err != nil {
 		return err
 	}
 
@@ -545,7 +546,12 @@ type callbackServer struct {
 	done        <-chan struct{}
 }
 
-func startCallbackServer(ctx context.Context) (callbackServer, error) {
+type callbackPayload struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+func startCallbackServer(ctx context.Context, stderr io.Writer) (callbackServer, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return callbackServer{}, fmt.Errorf("starting callback listener: %w", err)
@@ -558,8 +564,16 @@ func startCallbackServer(ctx context.Context) (callbackServer, error) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		_, _ = io.Copy(io.Discard, r.Body)
+		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		_ = r.Body.Close()
+		var payload callbackPayload
+		if err := json.Unmarshal(body, &payload); err == nil && payload.Type == "progress" {
+			if strings.TrimSpace(payload.Message) != "" {
+				_, _ = fmt.Fprintf(stderr, "\r[review] %s\n", payload.Message)
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		once.Do(func() { close(done) })
 	})
@@ -632,7 +646,7 @@ func signSlackRequest(secret, timestamp string, rawBody []byte) string {
 	return "v0=" + hex.EncodeToString(mac.Sum(nil))
 }
 
-func waitForCallback(ctx context.Context, done <-chan struct{}, timeout time.Duration) error {
+func waitForCallback(ctx context.Context, done <-chan struct{}, timeout time.Duration, stderr io.Writer) error {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -644,12 +658,12 @@ func waitForCallback(ctx context.Context, done <-chan struct{}, timeout time.Dur
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-done:
-			_, _ = fmt.Fprint(os.Stderr, "\rReview callback received.        \n")
+			_, _ = fmt.Fprint(stderr, "\r[review] Review complete.        \n")
 			return nil
 		case <-timer.C:
 			return fmt.Errorf("timed out after 11 minutes waiting for local callback")
 		case <-ticker.C:
-			_, _ = fmt.Fprintf(os.Stderr, "\rWaiting for review callback %s", spinner[i%len(spinner)])
+			_, _ = fmt.Fprintf(stderr, "\rWaiting for review callback %s", spinner[i%len(spinner)])
 			i++
 		}
 	}

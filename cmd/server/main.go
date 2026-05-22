@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 
 	"github.com/example/ai-pr-reviewer/config"
@@ -44,7 +47,7 @@ func main() {
 
 	reviewer := agents.NewOpenAIReviewer(cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.OpenAIReasoningEffort, cfg.OpenAIReviewRounds, skills, cfg.ReviewTraceIncludePrompts)
 	poster := slack.NewPoster(httpClient)
-	orchestratorOptions := []review.OrchestratorOption{}
+	orchestratorOptions := []review.OrchestratorOption{review.WithProgressReporter(localProgressReporter(poster))}
 	if cfg.ReviewTraceEnabled {
 		traceWriter := trace.NewWriter(cfg.ReviewTraceEnabled, cfg.ReviewTraceDir, cfg.ReviewTraceIncludePrompts, []string{
 			cfg.SlackSigningSecret,
@@ -76,4 +79,26 @@ func main() {
 		logger.Error("server failed", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
+}
+
+func localProgressReporter(poster *slack.Poster) review.ProgressReporter {
+	return func(ctx context.Context, responseURL, message string) error {
+		if !isLoopbackResponseURL(responseURL) {
+			return nil
+		}
+		return poster.PostProgress(ctx, responseURL, message)
+	}
+}
+
+func isLoopbackResponseURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := parsed.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

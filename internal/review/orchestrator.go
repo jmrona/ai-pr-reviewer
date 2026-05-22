@@ -47,13 +47,16 @@ type TraceWriter interface {
 
 type OrchestratorOption func(*Orchestrator)
 
+type ProgressReporter func(ctx context.Context, responseURL, message string) error
+
 type Orchestrator struct {
-	changes     ChangeFetcher
-	tickets     TicketFetcher
-	reviewer    Reviewer
-	poster      SlackPoster
-	logger      *slog.Logger
-	traceWriter TraceWriter
+	changes          ChangeFetcher
+	tickets          TicketFetcher
+	reviewer         Reviewer
+	poster           SlackPoster
+	logger           *slog.Logger
+	traceWriter      TraceWriter
+	progressReporter ProgressReporter
 }
 
 const noTicketContext = "No Jira ticket context was provided for this review."
@@ -72,6 +75,12 @@ func WithTraceWriter(traceWriter TraceWriter) OrchestratorOption {
 	}
 }
 
+func WithProgressReporter(reporter ProgressReporter) OrchestratorOption {
+	return func(orchestrator *Orchestrator) {
+		orchestrator.progressReporter = reporter
+	}
+}
+
 func (o *Orchestrator) Process(ctx context.Context, req Request) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -87,6 +96,7 @@ func (o *Orchestrator) Process(ctx context.Context, req Request) {
 }
 
 func (o *Orchestrator) process(ctx context.Context, req Request) error {
+	o.emitProgress(ctx, req, "Fetching merge request context...")
 	o.logger.InfoContext(ctx, "fetching GitLab changes", slog.String("project_path", req.ProjectPath), slog.Int("mr_iid", req.MRIID))
 	diff, truncated, err := o.changes.FetchChangeContext(ctx, req.ProjectPath, req.MRIID)
 	if err != nil {
@@ -95,6 +105,7 @@ func (o *Orchestrator) process(ctx context.Context, req Request) error {
 
 	ticketContext := noTicketContext
 	if req.IssueKey != "" {
+		o.emitProgress(ctx, req, "Fetching Jira issue...")
 		o.logger.InfoContext(ctx, "fetching Jira issue", slog.String("issue_key", req.IssueKey))
 		var err error
 		ticketContext, err = o.tickets.FetchTicketContext(ctx, req.IssueKey)
@@ -109,6 +120,10 @@ func (o *Orchestrator) process(ctx context.Context, req Request) error {
 		ReasoningEffort:       req.ReasoningEffort,
 		ReviewRounds:          req.ReviewRounds,
 		AdditionalInstruction: req.AdditionalInstruction,
+		Progress: func(ctx context.Context, message string) error {
+			o.emitProgress(ctx, req, message)
+			return nil
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("OpenAI review failed: %w", err)
@@ -133,6 +148,7 @@ func (o *Orchestrator) writeTrace(ctx context.Context, req Request, ticketContex
 		return
 	}
 
+	o.emitProgress(ctx, req, "Writing review trace...")
 	path, err := o.traceWriter.Write(ctx, trace.TraceInput{
 		IssueKey:              req.IssueKey,
 		MRURL:                 req.MRURL,
@@ -151,6 +167,15 @@ func (o *Orchestrator) writeTrace(ctx context.Context, req Request, ticketContex
 	}
 	if path != "" {
 		o.logger.InfoContext(ctx, "wrote review trace", slog.String("path", path))
+	}
+}
+
+func (o *Orchestrator) emitProgress(ctx context.Context, req Request, message string) {
+	if o.progressReporter == nil {
+		return
+	}
+	if err := o.progressReporter(ctx, req.ResponseURL, message); err != nil {
+		o.logger.WarnContext(ctx, "posting review progress failed", slog.String("error", err.Error()), slog.String("message", message))
 	}
 }
 

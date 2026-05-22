@@ -48,6 +48,34 @@ func (p *Poster) Post(ctx context.Context, responseURL, text string) error {
 	return nil
 }
 
+func (p *Poster) PostProgress(ctx context.Context, responseURL, message string) error {
+	body, err := json.Marshal(map[string]string{
+		"type":    "progress",
+		"message": message,
+	})
+	if err != nil {
+		return fmt.Errorf("encoding Slack progress response: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, responseURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("creating Slack progress request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("posting Slack progress response: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("posting Slack progress response: status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
 func FormatReviewResult(result agents.ReviewResult, issueKey, mrURL string) string {
 	var b strings.Builder
 	b.WriteString("*:robot_face: AI PR Review*")

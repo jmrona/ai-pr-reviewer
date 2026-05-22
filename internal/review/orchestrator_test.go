@@ -49,6 +49,55 @@ func TestOrchestratorWritesTraceOnSuccess(t *testing.T) {
 	}
 }
 
+func TestOrchestratorEmitsFetchJiraAndTraceProgressOnSuccess(t *testing.T) {
+	poster := &fakePoster{}
+	progress := &fakeProgressReporter{}
+	traceWriter := &fakeTraceWriter{path: "trace.md"}
+	orchestrator := NewOrchestrator(fakeChanges{}, &fakeTickets{}, &fakeReviewer{}, poster, slog.New(slog.NewTextHandler(io.Discard, nil)), WithTraceWriter(traceWriter), WithProgressReporter(progress.Report))
+
+	orchestrator.Process(context.Background(), Request{ResponseURL: "response", MRURL: "mr", ProjectPath: "org/repo", MRIID: 1, IssueKey: "PROJ-141"})
+
+	want := []string{"Fetching merge request context...", "Fetching Jira issue...", "Writing review trace..."}
+	if strings.Join(progress.messages, "|") != strings.Join(want, "|") {
+		t.Fatalf("progress messages = %#v, want %#v", progress.messages, want)
+	}
+	if len(poster.messages) != 1 || !strings.Contains(poster.messages[0], "AI PR Review") {
+		t.Fatalf("messages = %#v", poster.messages)
+	}
+}
+
+func TestOrchestratorSkipsJiraProgressWhenIssueKeyIsEmpty(t *testing.T) {
+	poster := &fakePoster{}
+	progress := &fakeProgressReporter{}
+	orchestrator := NewOrchestrator(fakeChanges{}, &fakeTickets{}, &fakeReviewer{}, poster, slog.New(slog.NewTextHandler(io.Discard, nil)), WithProgressReporter(progress.Report))
+
+	orchestrator.Process(context.Background(), Request{ResponseURL: "response", MRURL: "mr", ProjectPath: "org/repo", MRIID: 1})
+
+	for _, message := range progress.messages {
+		if message == "Fetching Jira issue..." {
+			t.Fatalf("progress messages = %#v, want Jira progress skipped", progress.messages)
+		}
+	}
+	if len(poster.messages) != 1 || !strings.Contains(poster.messages[0], "AI PR Review") {
+		t.Fatalf("messages = %#v", poster.messages)
+	}
+}
+
+func TestOrchestratorContinuesWhenProgressReporterFails(t *testing.T) {
+	poster := &fakePoster{}
+	progress := &fakeProgressReporter{err: errors.New("progress failed")}
+	orchestrator := NewOrchestrator(fakeChanges{}, &fakeTickets{}, &fakeReviewer{}, poster, slog.New(slog.NewTextHandler(io.Discard, nil)), WithProgressReporter(progress.Report))
+
+	orchestrator.Process(context.Background(), Request{ResponseURL: "response", MRURL: "mr", ProjectPath: "org/repo", MRIID: 1, IssueKey: "PROJ-141"})
+
+	if len(progress.messages) == 0 {
+		t.Fatal("progress reporter was not called")
+	}
+	if len(poster.messages) != 1 || !strings.Contains(poster.messages[0], "AI PR Review") {
+		t.Fatalf("messages = %#v", poster.messages)
+	}
+}
+
 func TestOrchestratorWritesNoTraceWhenTraceWriterIsNil(t *testing.T) {
 	poster := &fakePoster{}
 	orchestrator := NewOrchestrator(fakeChanges{}, &fakeTickets{}, &fakeReviewer{}, poster, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -97,8 +146,11 @@ func TestOrchestratorPassesReviewOptionsToReviewer(t *testing.T) {
 	})
 
 	want := agents.ReviewOptions{Model: "gpt-5.5", ReasoningEffort: "high", ReviewRounds: 1, AdditionalInstruction: "Only review auth changes."}
-	if reviewer.options != want {
+	if reviewer.options.Model != want.Model || reviewer.options.ReasoningEffort != want.ReasoningEffort || reviewer.options.ReviewRounds != want.ReviewRounds || reviewer.options.AdditionalInstruction != want.AdditionalInstruction {
 		t.Fatalf("review options = %#v, want %#v", reviewer.options, want)
+	}
+	if reviewer.options.Progress == nil {
+		t.Fatal("review options Progress = nil, want progress callback")
 	}
 }
 
@@ -191,4 +243,14 @@ type fakeTraceWriter struct {
 func (f *fakeTraceWriter) Write(_ context.Context, input trace.TraceInput) (string, error) {
 	f.inputs = append(f.inputs, input)
 	return f.path, f.err
+}
+
+type fakeProgressReporter struct {
+	messages []string
+	err      error
+}
+
+func (f *fakeProgressReporter) Report(_ context.Context, _ string, message string) error {
+	f.messages = append(f.messages, message)
+	return f.err
 }

@@ -116,7 +116,17 @@ The helper prompts on stderr for the GitLab MR URL, optional Jira ticket URL, mo
 
 The optional additional instruction guides review scope, such as asking the reviewer to focus on a specific risk or implementation area. It cannot suppress safety-critical findings visible in the diff, including secrets, exploitable security vulnerabilities, data-loss risks, or production-breaking correctness issues.
 
-Progress, prompts, errors, and diagnostics are written to stderr. On success, stdout contains only the extracted content between `## Parsed Review Result` and `## Final Slack Message` from the newest matching trace.
+Progress, prompts, errors, and diagnostics are written to stderr. Progress lines are prefixed with `[review]`, for example `[review] Fetching merge request context...` and `[review] Review complete.` On success, stdout contains the parsed review extracted from the newest matching trace plus the elapsed completion line, such as `Review completed in 2m13s`.
+
+To run the helper from any directory, add a shell function to `~/.zshrc` or your shell's equivalent config:
+
+```zsh
+ai-reviewer() {
+  (cd /Users/<user-name>/<path-to-this-folder>/ai-pr-reviewer && go run ./cmd/local-review "$@")
+}
+```
+
+After reloading your shell config, run `ai-reviewer` from any directory. If the repo is cloned elsewhere, adjust the path in the function.
 
 #### Example output
 

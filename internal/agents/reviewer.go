@@ -47,6 +47,7 @@ type ReviewOptions struct {
 	ReasoningEffort       string
 	ReviewRounds          int
 	AdditionalInstruction string
+	Progress              func(context.Context, string) error
 }
 
 type ReviewTrace struct {
@@ -113,6 +114,7 @@ func (r *OpenAIReviewer) Review(ctx context.Context, ticketContext, diff string,
 	var finalRound []AgentMessage
 	var priorRound []AgentMessage
 	for round := 1; round <= effectiveOptions.ReviewRounds; round++ {
+		emitProgress(ctx, effectiveOptions, fmt.Sprintf("Running specialist review round %d...", round))
 		messages, traces, err := r.runSpecialistRound(ctx, round, ticketContext, diff, priorRound, effectiveOptions)
 		if err != nil {
 			return ReviewOutcome{Trace: trace}, err
@@ -122,6 +124,7 @@ func (r *OpenAIReviewer) Review(ctx context.Context, ticketContext, diff string,
 		priorRound = messages
 	}
 
+	emitProgress(ctx, effectiveOptions, "Running Moderator...")
 	moderator, moderatorTrace, err := r.runAgent(ctx, "Moderator", "Moderator", "moderator", ticketContext, diff, finalRound, "=== FINAL SPECIALIST AGENT ANALYSIS ===", 0.1, effectiveOptions)
 	if err != nil {
 		return ReviewOutcome{Trace: trace}, err
@@ -137,6 +140,13 @@ func (r *OpenAIReviewer) Review(ctx context.Context, ticketContext, diff string,
 	result.DiffTruncated = diffTruncated
 
 	return ReviewOutcome{Result: result, Trace: trace}, nil
+}
+
+func emitProgress(ctx context.Context, options ReviewOptions, message string) {
+	if options.Progress == nil {
+		return
+	}
+	_ = options.Progress(ctx, message)
 }
 
 func (r *OpenAIReviewer) resolveReviewOptions(options ReviewOptions) ReviewOptions {

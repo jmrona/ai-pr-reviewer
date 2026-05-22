@@ -503,6 +503,62 @@ func TestOpenAIReviewerRunsTwoRoundSpecialistsWithRoundOneContextAndModeratesFin
 	}
 }
 
+func TestOpenAIReviewerEmitsConfiguredRoundAndModeratorProgress(t *testing.T) {
+	fake := newRecordingCompletion()
+	reviewer := newFakeReviewer(2, fake.complete)
+	var messages []string
+
+	_, err := reviewer.Review(context.Background(), "ticket", "diff", false, ReviewOptions{
+		Progress: func(_ context.Context, message string) error {
+			messages = append(messages, message)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Review() error = %v", err)
+	}
+
+	want := []string{"Running specialist review round 1...", "Running specialist review round 2...", "Running Moderator..."}
+	if strings.Join(messages, "|") != strings.Join(want, "|") {
+		t.Fatalf("progress messages = %#v, want %#v", messages, want)
+	}
+}
+
+func TestOpenAIReviewerSkipsRoundTwoProgressWhenConfiguredForOneRound(t *testing.T) {
+	fake := newRecordingCompletion()
+	reviewer := newFakeReviewer(1, fake.complete)
+	var messages []string
+
+	_, err := reviewer.Review(context.Background(), "ticket", "diff", false, ReviewOptions{
+		Progress: func(_ context.Context, message string) error {
+			messages = append(messages, message)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Review() error = %v", err)
+	}
+
+	want := []string{"Running specialist review round 1...", "Running Moderator..."}
+	if strings.Join(messages, "|") != strings.Join(want, "|") {
+		t.Fatalf("progress messages = %#v, want %#v", messages, want)
+	}
+}
+
+func TestOpenAIReviewerContinuesWhenProgressCallbackFails(t *testing.T) {
+	fake := newRecordingCompletion()
+	reviewer := newFakeReviewer(1, fake.complete)
+
+	_, err := reviewer.Review(context.Background(), "ticket", "diff", false, ReviewOptions{
+		Progress: func(context.Context, string) error {
+			return errors.New("progress failed")
+		},
+	})
+	if err != nil {
+		t.Fatalf("Review() error = %v", err)
+	}
+}
+
 func TestOpenAIReviewerTracesSuccessfulAgentDurations(t *testing.T) {
 	fake := newRecordingCompletion()
 	reviewer := newFakeReviewer(2, fake.complete)
